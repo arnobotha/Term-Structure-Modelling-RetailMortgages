@@ -1,0 +1,990 @@
+# ============================ RESAMPLING SCHEMES FOR SURVIVAL MODELS - ACS ==================================
+# A tool for implementing subsampling & resampling on a survival (panel) dataset usnig advanced clustered
+# sampling, with either random sampling or n-way stratified sampling. In the case of n-way stratified
+# sampling, a frequency analysis is conducted where observations/ records from stratum who have sizes
+# smaller than a specified threshold are excluded.
+# ------------------------------------------------------------------------------------------------------------
+# PROJECT TITLE: Default survival modelling
+# SCRIPT AUTHOR(S): Dr Arno Botha, Marcel Muller
+
+# DESCRIPTION:
+# This ancillary & exploratory script implements a given subsampling- and resampling scheme using advanced
+# clustered sampling. Either random sampling or n-way stratified sampling is applied as the inner sampling
+# technique. For the latter a frequency analysis is conducted and stratum with sizes below a specified
+# threshold are excluded. The resulting cross-validation scheme is screened for time-dependent sampling biased
+# using the MAEs from a 12-month conditional default rate. In addition to screening for time-dependent
+# sampling bias, resolution rates defined for spell entry time is used to investigate the structure of the
+# datasets. These graphs are inadequate when investigating the TTC-means though, and subsequent resolution
+# rates for spell exit (stop) are with assocIAted MAEs are also computed. These three measures,
+# (12-month conditional default rate, resolution rate for spell entry, and resolution rate for spell exit)
+# give conclusive insight on the representativeness of the chosen cross-validtIon scheme and chosen
+# inner sampling technique.
+# ------------------------------------------------------------------------------------------------------------
+# -- Script dependencies:
+#   - 0.Setup
+#   - 2d.Data_Fusion
+
+# -- Inputs:
+#   - datCredit_real | Prepared from script 2d.Data_Fusion.
+#
+# -- Outputs:
+#   - Series of graphs for testing the time-dependent sampling bias of the chosen (simple clustered sampling)
+#     resampling scheme and inner sampling technique:
+#       - Frequency analysis of strata size graph (stratification specified as the inner sampling technique);
+#       - 12-month conditional default rate graph;
+#       - Resolution rates for spell entry (split for performance- and default spells);
+#       - Resolution rates for spell exit/ stop (split for performance- and default spells).
+# --------------------------------------------------------------------------------------------------------------
+
+
+# ------ 1. Preliminaries
+# --- Load in Dataset
+if (!exists('datCredit_real')) unpack.ffdf(paste0(genPath,"creditdata_final4"), tempPath)
+
+# --- Some feature engineering
+# - Max- and min date of each performance spell (used as a stratifier)
+datCredit_real[!is.na(PerfSpell_Key), c("PerfSpell_Min_Date","PerfSpell_Max_Date") := as.list(range(Date, na.rm=TRUE)), by=list(PerfSpell_Key)]
+datCredit_real[is.na(PerfSpell_Key), c("PerfSpell_Min_Date","PerfSpell_Max_Date") := as.list(c(NA,NA)), by=list(PerfSpell_Key)]
+# Sanity check - Should be TRUE
+datCredit_real[!is.na(PerfSpell_Key),.N] == datCredit_real[!is.na(PerfSpell_Max_Date),.N] # TRUE, field created successfully
+datCredit_real[!is.na(PerfSpell_Key),.N] == datCredit_real[!is.na(PerfSpell_Min_Date),.N] # TRUE, field created successfully
+# - Max- and min date of each default spell (used as a stratifier and for identifying FALSE default spells)
+datCredit_real[!is.na(DefSpell_Key), c("DefSpell_Min_Date","DefSpell_Max_Date") := as.list(range(Date, na.rm=TRUE)), by=list(DefSpell_Key)]
+datCredit_real[is.na(DefSpell_Key), c("DefSpell_Min_Date","DefSpell_Max_Date") := as.list(c(NA,NA)), by=list(DefSpell_Key)]
+# Sanity check - Should be TRUE
+datCredit_real[!is.na(DefSpell_Key),.N] == datCredit_real[!is.na(DefSpell_Max_Date),.N] # TRUE, field created successfully
+datCredit_real[!is.na(DefSpell_Key),.N] == datCredit_real[!is.na(DefSpell_Min_Date),.N] # TRUE, field created successfully
+
+# - Creating a curing indicator for default spells (enables graphing of curing events in default spells)
+datCredit_real[, Cured_Ind := ifelse(!is.na(DefSpell_Key) & DefSpellResol_Type_Hist=="Cured" & Date==DefSpell_Max_Date,1,0)] # | Reduce conditions to only the second and third (check feasibility)
+
+# - Creating new spell resolution types (for faceting purposes)
+# Performance spells - Used as stratifiers
+datCredit_real <- datCredit_real %>% mutate(PerfSpellResol_Type_Hist2 = case_when(PerfSpellResol_Type_Hist=="Defaulted" ~ "Defaulted",
+                                                                                  PerfSpellResol_Type_Hist=="Censored" ~ "Censored",
+                                                                                  PerfSpellResol_Type_Hist %in% c("Settled", "Paid-up", "Written-off") ~ "Settled & Other",
+                                                                                  TRUE ~ NA))
+# Used for graphin purposes (for faceting of the resolution rates)
+datCredit_real <- datCredit_real %>% mutate(PerfSpellResol_Type_Hist3 = case_when(PerfSpellResol_Type_Hist=="Defaulted" ~ "Defaulted",
+                                                                                  PerfSpellResol_Type_Hist %in% c("Censored", "Settled", "Paid-up", "Written-off") ~ "Other",
+                                                                                  TRUE ~ NA))
+# Sanity check - Should be TRUE
+datCredit_real[is.na(PerfSpell_Key),.N] == datCredit_real[is.na(PerfSpellResol_Type_Hist2),.N] # TRUE, field created successfully
+datCredit_real[is.na(PerfSpell_Key),.N] == datCredit_real[is.na(PerfSpellResol_Type_Hist3),.N] # TRUE, field created successfully
+
+
+# - Creating new default spell resolution types - for faceting of the resolution rates
+datCredit_real <- datCredit_real %>% mutate(DefSpellResol_Type_Hist2 = case_when(DefSpellResol_Type_Hist=="WOFF" ~ "WOFF",
+                                                                                 DefSpellResol_Type_Hist %in% c("Cured", "Censored") ~ "Other",
+                                                                                 TRUE ~ NA))
+# Sanity check - Should be TRUE
+datCredit_real[is.na(DefSpell_Key),.N] == datCredit_real[is.na(DefSpellResol_Type_Hist2),.N] # TRUE, field created successfully
+
+# --- Identifying single observation default spells as they are not taken into account directly through the subsampling/ resampling scheme
+datCredit_real[, DefSpell_Exc := F] # Creating a variable for identifying these observations
+datCredit_real[DefSpell_Counter==1 & Date==DefSpell_Max_Date, DefSpell_Exc := T] # Identifying FALSE default spells
+# - Checking how many single-observation default spells exist and assessing their impact
+(check.1 <- datCredit_real[DefSpell_Exc==T, .N] / datCredit_real[DefSpell_Counter==1,.N])
+cat(sprintf("%.4f", check.1), "% (", datCredit_real[DefSpell_Exc==T, .N], " of ", datCredit_real[DefSpell_Counter==1,.N], ")", "of default spells are to be excluded and are indirectly taken in to account via the subsampling/ resampling scheme.")
+
+# --- Some parameters
+# - Confidence interval parameter
+confLevel <- 0.95
+
+# - Field names
+# Required field names
+targetVar <- "DefaultStatus1_lead_12_max" # Field name of the main target (i.e., the 12-month default rate)
+CurStatus <- "DefaultStatus1"
+excDef <- "DefSpell_Exc" # Field for identifying single-observation default spells (they are indirectly excluded from the resampling scheme)
+clusVar <- "LoanID" # Field name of unique account identifier
+clusVar_Perf <- "PerfSpell_Key" # Field name of unique performance spell identifier
+clusVar_Def <- "DefSpell_Key" # Field name of unique default spell identifier
+timeVar <- "Date" # Field name of time variable
+counter <- "Counter" # Field name of counter for loan observations
+perfCounter <- "PerfSpell_Counter" # Field name of counter for performance spell observations
+defCounter <- "DefSpell_Counter" # Field name of counter for default spell observations
+# Names of the stratifiers
+stratifiers_Perf <- c("PerfSpell_Max_Date", "PerfSpellResol_Type_Hist2") # c("PerfSpell_Max_Date", "PerfSpellResol_Type_Hist2") #First variable should be of type "date"
+stratifiers_Def <- c("DefSpell_Max_Date", "DefSpellResol_Type_Hist") # c("DefSpell_Max_Date", "DefSpellResol_Type_Hist")
+# Facet specification (for graphing purposes of the resolution rates)
+resolPerf <- "PerfSpellResol_Type_Hist2" # Field name of performance spell resolution types used for faceting of the resolution rates for spell start time - first level should be the target event (default)
+resolDef <- "DefSpellResol_Type_Hist" # Field name of default spell resolution types used for faceting of the resolution rates for spell start time 
+resolPerf_stop <- "PerfSpellResol_Type_Hist3" # Field name for performance spell resolution rate; specific for the stopping time cohort | Assign [resolPerf] if not interested in controlling the resolution rate facet for stop dates
+resolPerf_stop2 <- "Defaulted" # Name of the main resolution type (typically default) used to obtain a single facet (this level needs to be within the resolPerf_stop variable) | Set to NA if not interested in creating additional facets for the performance spells using stopping time
+resolDef_stop <-  "DefSpellResol_Type_Hist2" # Field name for default spell resolution rate; specific for the stopping time cohort | Assign [resolDef] if not interested in controlling the resolution rate facet for stop dates
+# Final Selection
+selectionVar <- unique(c(clusVar, clusVar_Perf, clusVar_Def, timeVar, CurStatus, counter, perfCounter, defCounter, resolPerf, resolDef,
+                         resolPerf_stop, resolDef_stop, excDef, stratifiers_Perf, stratifiers_Def, targetVar)) # Variables to subset
+selectionVar <- selectionVar[!is.na(selectionVar)] # Facilitating cases where the variables are left unspecified (specifically for use of no stratifiers)
+
+# - Subset given dataset accordingly; an efficiency enhancement
+datCredit <- subset(datCredit_real, select=selectionVar)
+
+# - Subsampling & resampling parameters
+smp_size <- 65000 # fixed size of downsampled set in terms of the number of unique performance spells
+cat(smp_size, " is ", sprintf("%.4f", smp_size/length(unique(datCredit[,get(clusVar_Perf)]))*100), "% of all performance spells.")
+smp_frac <- 0.7 # sampling fraction for resampling scheme
+
+minStrata_size_Perf <- 0 # 10 is set as the preliminary minimum size
+minStrata_size_Def <- 0 # 10 is set as the preliminary minimum size
+
+# - Clean up
+rm(datCredit_real, check.1); gc()
+
+
+
+
+# ------ 2. Subsampled resampling scheme: basic cross-validation with simple random sampling
+# --- Feature engineering spell level date variables
+# - Max- and min date of each performance spell (used as a stratifier)
+datCredit[!is.na(get(clusVar_Perf)), c("timeVar_Perf_Min","timeVar_Perf_Max") := as.list(range(get(timeVar), na.rm=TRUE)), by=list(get(clusVar_Perf))]
+datCredit[is.na(get(clusVar_Perf)), c("timeVar_Perf_Min","timeVar_Perf_Max") := as.list(c(NA,NA)), by=list(get(clusVar_Perf))]
+# - Max- and min date of each default spell (used as a stratifier and for identifying FALSE default spells)
+datCredit[!is.na(get(clusVar_Def)), c("timeVar_Def_Min","timeVar_Def_Max") := as.list(range(get(timeVar), na.rm=TRUE)), by=list(get(clusVar_Def))]
+datCredit[is.na(get(clusVar_Def)), c("timeVar_Def_Min","timeVar_Def_Max") := as.list(c(NA,NA)), by=list(get(clusVar_Def))]
+
+# --- Subsampling
+# - Implied sampling fraction for downsampling step
+smp_perc <- smp_size/length(unique(datCredit[,get(clusVar_Perf)]))
+# - Setting the seed
+set.seed(1)
+
+# - Conditional loop for stratifiers
+if ((all(is.na(stratifiers_Perf)) | all(is.na(stratifiers_Def)))){ # - No stratifiers
+  # Obtain the first observation of each performance- and default spells (in doing so we obtain all the unique PerfSpell_Keys and DefSpell_Keys)
+  dat_keys_perf <- unique(datCredit[!is.na(clusVar_Perf), get(clusVar_Perf)]) %>% as.data.table() %>% drop_na(); colnames(dat_keys_perf) <- clusVar_Perf
+  dat_keys_def <- unique(datCredit[get(excDef)==F & !is.na(get(clusVar_Def)), get(clusVar_Def)]) %>% as.data.table() %>% drop_na(); colnames(dat_keys_def) <- clusVar_Def
+  # Use simple random sampling with the stratifiers to select the performance- and default spell IDs that ought to be in the subsampled dataset
+  dat_smp_keys_perf <- dat_keys_perf %>% slice_sample(prop=smp_perc) %>% as.data.table()
+  dat_smp_keys_def <- dat_keys_def %>% slice_sample(prop=smp_perc) %>% as.data.table()
+} else { # - Stratifiers
+  # Obtain the first observation of each performance- and default spells (in doing so we obtain all the unique PerfSpell_Keys and DefSpell_Keys)
+  dat_keys_perf <- unique(datCredit[!is.na(clusVar_Perf), mget(c(clusVar_Perf, stratifiers_Perf))]) %>% as.data.table() %>% drop_na()
+  dat_keys_def <- unique(datCredit[get(excDef)==F & !is.na(get(clusVar_Def)), mget(c(clusVar_Def, stratifiers_Def))]) %>% as.data.table() %>% drop_na()
+  # Use simple random sampling with the stratifiers to select the performance- and default spell IDs that ought to be in the subsampled dataset
+  dat_smp_keys_perf <- dat_keys_perf %>% group_by(across(all_of(stratifiers_Perf))) %>% slice_sample(prop=smp_perc) %>% as.data.table()
+  dat_smp_keys_def <- dat_keys_def %>% group_by(across(all_of(stratifiers_Def))) %>% slice_sample(prop=smp_perc) %>% as.data.table()
+}
+
+# - Create two subsampled datasets from the sampled performance- and default spell IDs
+datCredit_smp_perf <- datCredit %>% subset(get(clusVar_Perf) %in% dat_smp_keys_perf[, get(clusVar_Perf)])
+datCredit_smp_def <- datCredit %>% subset(get(clusVar_Def) %in% dat_smp_keys_def[, get(clusVar_Def)])
+# - Fuse the subsampled datasets
+datCredit_smp <- funion(datCredit_smp_perf, datCredit_smp_def, all = F) # Using a union to concatenate the two training datasets (duplicate rows are removed)
+# - Arranging the subsample and removing defExc (this will be recreated for the resampling scheme)
+datCredit_smp <- datCredit_smp %>% arrange(get(clusVar), get(timeVar)) %>% setDT()
+# - Creating a variable for identifying FALSE performance- and default spells
+datCredit_smp <- False_Perf_Def(datCredit_smp, LoanID=clusVar, Date=timeVar, PerfSpellID=clusVar_Perf, DefSpellID=clusVar_Def,
+                                Counter=counter, PerfSpell_Counter=perfCounter, DefSpell_Counter=defCounter,
+                                PerfSpell_Max_Date = "timeVar_Perf_Max", DefSpell_Max_Date = "timeVar_Def_Max")
+
+# - [CHECK] Proportion of default spells in the full dataset and the subsequent training- and validation datasets
+check.2_a <- datCredit[DefSpell_Counter==1,.N]/(datCredit[PerfSpell_Counter==1, .N] + datCredit[DefSpell_Counter==1, .N])
+check.2_b <- datCredit_smp[DefSpell_Counter==1, .N]/(datCredit_smp[PerfSpell_Counter==1, .N] + datCredit_smp[DefSpell_Counter==1 & !is.na(DefSpell_Key), .N])
+cat(sprintf("%.4f", check.2_a*100), "% of all spells in the full dataset are default spells. \n",
+    sprintf("%.4f", check.2_b*100), "% of all spells in the subsampled dataset are performance spells. \n")
+
+# - Identifying single observation default spells as they are not taken into account directly through the resampling scheme
+datCredit_smp[, (excDef) := F] # Creating a variable for identifying these observations
+datCredit_smp[get(defCounter)==1 & get(timeVar)==timeVar_Def_Max, (excDef) := T] # Identifying FALSE default spells
+# Checking how many single observations default spells exist and assessing their impact
+check.3 <- datCredit_smp[get(excDef)==T, .N] / datCredit_smp[get(defCounter)==1,.N]
+cat(sprintf("%.4f", check.3), "% (", datCredit_smp[get(excDef)==T, .N], " of ", datCredit_smp[get(defCounter)==1,.N], ")", "of default spells are to be excluded and are indirectly taken into account via the subsampling/ resampling scheme.")
+
+# - Clean up
+rm(dat_smp_keys_perf, dat_smp_keys_def,  datCredit_smp_perf, datCredit_smp_def, check.2_a, check.2_b, check.3)
+
+
+# --- Minimum stratum analysis and subsequent exclusions to ensure adherence to specified threshold for PERFORMANCE SPELLS
+if (!(all(is.na(stratifiers_Perf)) | all(is.na(stratifiers_Def)))){
+  # - Obtaining the stratum that are below the minimum
+  selectionVar_smp_Perf <- c(clusVar_Perf, timeVar, stratifiers_Perf)
+  datStrata_smp_min_Perf <- datCredit_smp[get(perfCounter)==1, mget(selectionVar_smp_Perf)][, list(Freq = .N), by=stratifiers_Perf][Freq<minStrata_size_Perf,]
+  cat(sum(datStrata_smp_min_Perf[,Freq]), "accounts of ", datCredit_smp[get(perfCounter)==1,.N], "(", sprintf("%.4f", sum(datStrata_smp_min_Perf[,Freq])/datCredit_smp[get(perfCounter)==1,.N]*100), "%) need to be excluded to ensure a minimum strata size of ", minStrata_size_Perf)
+  
+  # - Conditionally applying the exclusions
+  if (sum(datStrata_smp_min_Perf[,Freq]) > 0){
+    # Saving the number of records and the prior probability, in the subsampled dataset, for reporting
+    datCredit_smp_old_n_Perf <- datCredit_smp[!is.na(get(clusVar_Perf)),.N]; datCredit_smp_prior_Perf <- (datCredit_smp[get(perfCounter)==1, get(resolPerf)] %>% table() %>% prop.table())[[2]] # NOTE: Change this indexing number manually for the target variable
+    # Initiating a vector which will contain the exclusion IDs
+    dat_keys_exc_Perf <- NA
+    # Looping through the minimum strata dataset and building an exclusion condition (filter) for each row therein
+    for (i in 1:datStrata_smp_min_Perf[,.N]){
+      class_type_Perf <- sapply(datStrata_smp_min_Perf[,1:length(stratifiers_Perf)], function(x) {class(x[[1]])}) # Getting the type of class of each stratifier (used for building the ith condition)
+      
+      excCond_Perf <- datStrata_smp_min_Perf[i,1:length(stratifiers_Perf)] # Getting the values of the ith minimum strata
+      excCond_Perf <- data.table(Stratifier = colnames(excCond_Perf), # Building a dataset
+                            Value = unname(t(excCond_Perf)),
+                            Class = class_type_Perf)
+      excCond_Perf[, Value.V1 := ifelse(Class %in% c("numeric", "Date"), paste0("as.",Class,"(",'"',Value.V1,'"',")"), paste0('"', Value.V1, '"'))]
+      excCond_Perf[, Condition := paste0(Stratifier, " == ", Value.V1, " & ")] # Adding an "and" operator to enable multiple conditions
+      excCond2_Perf <- parse(text = paste0(paste0(excCond_Perf$Condition, collapse = ""), perfCounter, "==1")) # Compiling the ith condition
+      
+      dat_keys_exc_Perf <- c(dat_keys_exc_Perf, as.vector(datCredit_smp[eval(excCond2_Perf), get(clusVar_Perf)]))
+    }
+    dat_keys_exc_Perf <- dat_keys_exc_Perf[-1] # Removing the first value (as it is a missing value stemming from the vector's creation)
+    
+    # Applying the exclusions to the subsampled dataset
+    datCredit_smp <- copy(datCredit_smp[!(get(clusVar_Perf) %in% dat_keys_exc_Perf),])
+    
+    cat(datCredit_smp_old_n_Perf-datCredit_smp[!is.na(get(clusVar_Perf)),.N], " observations removed (", sprintf("%.4f", (datCredit_smp_old_n_Perf-datCredit_smp[!is.na(get(clusVar_Perf)),.N])/datCredit_smp_old_n_Perf*100), "% ) \n",
+        "Prior probability = ", sprintf("%.4f", datCredit_smp_prior_Perf*100), "% comapred to ", sprintf("%.4f", (datCredit_smp[get(perfCounter)==1, get(resolPerf)] %>% table() %>% prop.table())[[2]]*100), "%")
+  }
+  # - Obtaining the stratum that are below the minimum
+  datStrata_smp_min_Perf <- datCredit_smp[get(perfCounter)==1, mget(selectionVar_smp_Perf)][, list(Freq = .N), by=stratifiers_Perf][Freq<minStrata_size_Perf,]
+  cat(sum(datStrata_smp_min_Perf[,Freq]), "accounts of ", datCredit_smp[get(perfCounter)==1,.N], "(", sprintf("%.4f", sum(datStrata_smp_min_Perf[,Freq])/datCredit_smp[get(perfCounter)==1,.N]*100), "%) need to be excluded to ensure a minimum strata size of ", minStrata_size_Perf)
+  
+  # - Cleanup
+  suppressWarnings(rm(selectionVar_smp_Perf, datStrata_smp_min_Perf, datCredit_smp_old_n_Perf, datCredit_smp_prior_Perf, class_type_Perf, excCond_Perf, excCond2_Perf))
+  
+  
+  # --- Minimum stratum analysis and subsequent exclusions to ensure adherence to specified threshold for DEFAULT SPELLS
+  # - Obtaining the stratum that are below the minimum
+  selectionVar_smp_Def <- c(clusVar_Def, timeVar, stratifiers_Def)
+  datStrata_smp_min_Def <- datCredit_smp[get(defCounter)==1, mget(selectionVar_smp_Def)][, list(Freq = .N), by=stratifiers_Def][Freq<minStrata_size_Def,]
+  cat(sum(datStrata_smp_min_Def[,Freq]), "accounts of ", datCredit_smp[get(defCounter)==1,.N], "(", sprintf("%.4f", sum(datStrata_smp_min_Def[,Freq])/datCredit_smp[get(defCounter)==1,.N]*100), "%) need to be excluded to ensure a minimum strata size of ", minStrata_size_Def)
+  
+  # - Conditionally applying the exclusions
+  if (sum(datStrata_smp_min_Def[,Freq]) > 0){
+    # Saving the number of records and the prior probability, in the subsampled dataset, for reporting
+    datCredit_smp_old_n_Def <- datCredit_smp[!is.na(get(clusVar_Def)),.N]; datCredit_smp_prior_Def <- (datCredit_smp[get(defCounter)==1, get(resolDef)] %>% table() %>% prop.table())[[2]] # NOTE: Change this indexing number manually for the target variable
+    # Initiating a vector which will contain the exclusion IDs
+    dat_keys_exc_Def <- NA
+    # Looping through the minimum strata dataset and building an exclusion condition (filter) for each row therein
+    for (i in 1:datStrata_smp_min_Def[,.N]){
+      class_type_Def <- sapply(datStrata_smp_min_Def[,1:length(stratifiers_Def)], function(x) {class(x[[1]])}) # Getting the type of class of each stratifier (used for building the ith condition)
+      
+      excCond_Def <- datStrata_smp_min_Def[i,1:length(stratifiers_Def)] # Getting the values of the ith minimum strata
+      excCond_Def <- data.table(Stratifier = colnames(excCond_Def), # Building a dataset
+                                 Value = unname(t(excCond_Def)),
+                                 Class = class_type_Def)
+      excCond_Def[, Value.V1 := ifelse(Class %in% c("numeric", "Date"), paste0("as.",Class,"(",'"',Value.V1,'"',")"), paste0('"', Value.V1, '"'))]
+      excCond_Def[, Condition := paste0(Stratifier, " == ", Value.V1, " & ")] # Adding an "and" operator to enable multiple conditions
+      excCond2_Def <- parse(text = paste0(paste0(excCond_Def$Condition, collapse = ""), defCounter, "==1")) # Compiling the ith condition
+      
+      dat_keys_exc_Def <- c(dat_keys_exc_Def, as.vector(datCredit_smp[eval(excCond2_Def), get(clusVar_Def)]))
+    }
+    dat_keys_exc_Def <- dat_keys_exc_Def[-1] # Removing the first value (as it is a missing value stemming from the vector's creation)
+    
+    # Applying the exclusions to the subsampled dataset
+    datCredit_smp <- copy(datCredit_smp[!(get(clusVar_Def) %in% dat_keys_exc_Def),])
+    
+    cat(datCredit_smp_old_n_Def-datCredit_smp[!is.na(get(clusVar_Def)),.N], " observations removed (", sprintf("%.4f", (datCredit_smp_old_n_Def-datCredit_smp[!is.na(get(clusVar_Def)),.N])/datCredit_smp_old_n_Def*100), "% ) \n",
+        "Prior probability = ", sprintf("%.4f", datCredit_smp_prior_Def*100), "% comapred to ", sprintf("%.4f", (datCredit_smp[get(defCounter)==1, get(resolDef)] %>% table() %>% prop.table())[[2]]*100), "%")
+  }
+  # - Obtaining the stratum that are below the minimum
+  datStrata_smp_min_Def <- datCredit_smp[get(defCounter)==1, mget(selectionVar_smp_Def)][, list(Freq = .N), by=stratifiers_Def][Freq<minStrata_size_Def,]
+  cat(sum(datStrata_smp_min_Def[,Freq]), "accounts of ", datCredit_smp[get(defCounter)==1,.N], "(", sprintf("%.4f", sum(datStrata_smp_min_Def[,Freq])/datCredit_smp[!is.na(get(clusVar_Def)) & get(defCounter)==1,.N]*100), "%) need to be excluded to ensure a minimum strata size of ", minStrata_size_Def)
+  
+  suppressWarnings(rm(selectionVar_smp_Def, datStrata_smp_min_Def, datCredit_smp_old_n_Def, datCredit_smp_prior_Def, class_type_Def, excCond_Def, excCond2_Def))
+}
+
+
+# --- Implement resampling scheme using given main sampling fraction
+# - Setting the seed
+set.seed(1)
+# - Conditional loop for stratifiers
+if ((all(is.na(stratifiers_Perf)) | all(is.na(stratifiers_Def)))){ # No stratifiers
+  # - Obtain the first observation of each performance- and default spells (in doing so we obtain all the unique PerfSpell_Keys and DefSpell_Keys)
+  dat_keys_smp_perf <- unique(datCredit_smp[!is.na(get(clusVar_Perf)), get(clusVar_Perf)]) %>% as.data.table() %>% drop_na(); colnames(dat_keys_smp_perf) <- clusVar_Perf
+  dat_keys_smp_def <- unique(datCredit_smp[!is.na(get(clusVar_Def)) & get(excDef)==F, get(clusVar_Def)]) %>% as.data.table() %>% drop_na(); colnames(dat_keys_smp_def) <- clusVar_Def
+  # - Creating the training- and validation datasets
+  # Use simple random sampling from the unique performance- and default spell keys
+  dat_train_keys_perf <- dat_keys_smp_perf %>% slice_sample(prop=smp_frac) %>% as.data.table()
+  dat_train_keys_def <- dat_keys_smp_def %>% slice_sample(prop=smp_frac) %>% as.data.table()
+} else { # Stratifiers
+  # - Obtain the first observation of each performance- and default spells (in doing so we obtain all the unique PerfSpell_Keys and DefSpell_Keys)
+  dat_keys_smp_perf <- unique(datCredit_smp[!is.na(get(clusVar_Perf)), mget(c(clusVar_Perf, stratifiers_Perf))])
+  dat_keys_smp_def <- unique(datCredit_smp[!is.na(get(clusVar_Def)) & get(excDef)==F, mget(c(clusVar_Def, stratifiers_Def))])
+  # - Creating the training- and validation datasets
+  # Use simple random sampling from the unique performance- and default spell keys
+  dat_train_keys_perf <- dat_keys_smp_perf %>% group_by(across(all_of(stratifiers_Perf))) %>% slice_sample(prop=smp_frac) %>% as.data.table()
+  dat_train_keys_def <- dat_keys_smp_def %>% group_by(across(all_of(stratifiers_Def))) %>% slice_sample(prop=smp_frac) %>% as.data.table()
+}
+# Create two training datasets from the sampled performance- and default spell IDs
+datCredit_train_perf <- datCredit_smp %>% subset(get(clusVar_Perf) %in% dat_train_keys_perf[, get(clusVar_Perf)])
+datCredit_train_def <- datCredit_smp %>% subset(get(clusVar_Def) %in% dat_train_keys_def[, get(clusVar_Def)])
+# Create two validation datasets from the sampled performance- and default spell IDs
+datCredit_valid_perf <- datCredit_smp %>% subset(!is.na(get(clusVar_Perf)) & !(get(clusVar_Perf) %in% datCredit_train_perf[, get(clusVar_Perf)]))
+datCredit_valid_def <- datCredit_smp %>% subset(!is.na(get(clusVar_Def)) & !(get(clusVar_Def) %in% datCredit_train_def[, get(clusVar_Def)]))
+# Fuse the two training- and validation datasets
+datCredit_train <- funion(datCredit_train_perf, datCredit_train_def, all = F) # Using a union to concatenate the two training datasets (duplicate rows are removed)
+datCredit_valid <- funion(datCredit_valid_perf, datCredit_valid_def, all = F) # Using a union to concatenate the two validation datasets (duplicate rows are removed)
+# - Arranging the subsample and removing defExc (this will be recreated for the resampling scheme)
+datCredit_train <- datCredit_train %>% subset(select=-which(names(datCredit_train) %in% c(excDef, "PerfSpell_F", "DefSpell_F"))) %>% arrange(get(clusVar), get(timeVar)) %>% setDT()
+datCredit_valid <- datCredit_valid %>% subset(select=-which(names(datCredit_valid) %in% c(excDef, "PerfSpell_F", "DefSpell_F"))) %>% arrange(get(clusVar), get(timeVar)) %>% setDT()
+# - Creating a variable for identifying FALSE performance- and default spells
+datCredit_train <- False_Perf_Def(datCredit_train, LoanID=clusVar, Date=timeVar, PerfSpellID=clusVar_Perf, DefSpellID=clusVar_Def,
+                                  Counter=counter, PerfSpell_Counter=perfCounter, DefSpell_Counter=defCounter,
+                                  PerfSpell_Max_Date = "timeVar_Perf_Max", DefSpell_Max_Date = "timeVar_Def_Max")
+datCredit_valid <- False_Perf_Def(datCredit_valid, LoanID=clusVar, Date=timeVar, PerfSpellID=clusVar_Perf, DefSpellID=clusVar_Def,
+                                  Counter=counter, PerfSpell_Counter=perfCounter, DefSpell_Counter=defCounter,
+                                  PerfSpell_Max_Date = "timeVar_Perf_Max", DefSpell_Max_Date = "timeVar_Def_Max")
+
+# - [CHECK] Proportion of default spells in the full dataset and the subsequent training- and validation datasets
+check.4_a <- datCredit_smp[get(defCounter)==1,.N]/(datCredit_smp[get(perfCounter)==1, .N] + datCredit_smp[get(defCounter)==1, .N])
+check.4_b <- datCredit_train[get(defCounter)==1, .N]/(datCredit_train[get(perfCounter)==1, .N] + datCredit_train[get(defCounter)==1, .N])
+check.4_c <- datCredit_valid[get(defCounter)==1, .N]/(datCredit_valid[get(perfCounter)==1, .N] + datCredit_valid[get(defCounter)==1, .N])
+cat(sprintf("%.4f", check.4_a*100), "% of all spells in the full dataset are default spells. \n",
+    sprintf("%.4f", check.4_b*100), "% of all spells in the training dataset are default spells. \n",
+    sprintf("%.4f", check.4_c*100), "% of all spells in the validation dataset are default spells. \n")
+# - [CHECK] Reconstitution of the cross-validation scheme
+check.5_a <- datCredit_smp[!is.na(get(clusVar_Perf)), .N] == datCredit_train[!is.na(get(clusVar_Perf)), .N] + datCredit_valid[!is.na(get(clusVar_Perf)), .N] # Performance spells
+check.5_b <- datCredit_smp[!is.na(get(clusVar_Def)), .N] == datCredit_train[!is.na(get(clusVar_Def)), .N] + datCredit_valid[!is.na(get(clusVar_Def)), .N] # Default spells
+cat(ifelse((check.5_a & check.5_b), "SAFE: Resampling scheme reconstitues subsampled dataset", "WARNING: Not all observations accounted for in resampling scheme"))
+
+# --- Clean up
+suppressWarnings(rm(dat_keys_smp_perf, dat_keys_smp_perf,  dat_train_keys_perf, dat_train_keys_def, datCredit_train_perf, datCredit_train_def,  datCredit_valid_perf, datCredit_valid_def,
+                    check.4_a, check.4_b, check.4_c, check.5_a, check.5_b))
+
+
+
+
+# ------ 3. Restructuring the datasets to enable easier graphing
+# - Full dataset
+colnames(datCredit)[1:8] <- c("ClusVar", "ClusVar_Perf", "ClusVar_Def", "timeVar", "CurStatus", "Counter", "PerfSpell_Counter", "DefSpell_Counter")
+# - Subsampled dataset
+colnames(datCredit_smp)[1:8] <- c("ClusVar", "ClusVar_Perf", "ClusVar_Def", "timeVar", "CurStatus", "Counter", "PerfSpell_Counter", "DefSpell_Counter")
+# - Training dataset
+colnames(datCredit_train)[1:8] <- c("ClusVar", "ClusVar_Perf", "ClusVar_Def", "timeVar", "CurStatus", "Counter", "PerfSpell_Counter", "DefSpell_Counter")
+# - Validation dataset
+colnames(datCredit_valid)[1:8] <- c("ClusVar", "ClusVar_Perf", "ClusVar_Def", "timeVar", "CurStatus", "Counter", "PerfSpell_Counter", "DefSpell_Counter")
+
+# - Merge samples together
+datGraph <- rbind(datCredit[, `:=` (Sample="a_Full", PerfSpell_F=F, DefSpell_F=F, DefSpell_Exc=NULL)],
+                  datCredit_train[, Sample:="b_Train"],
+                  datCredit_valid[, Sample:="c_Valid"])
+
+
+
+
+# ------ 4. Frequency analysis on a n-way stratified inner sampling technique (if any is selected)
+# --- Conditional loop for stratifiers
+if (!(all(is.na(stratifiers_Perf)) | all(is.na(stratifiers_Def)))){
+  # - Determine subsampling window given cross-sectional design
+  StartDte <- min(datCredit_smp$timeVar, na.rm=T)
+  EndDte <- max(datCredit_smp$timeVar, na.rm=T)
+  minDate <- StartDte %m+% months(1)
+  maxDate <- EndDte - years(1)# A post-hoc filter, used for graphing purposes, given a 12-month outcome window
+  
+  # - Aggregate data according to the same n-way stratified sampling technique used within subsampling/resampling scheme
+  selectionVar_train_Perf <- c("ClusVar_Perf", "timeVar", stratifiers_Perf); selectionVar_train_Def <- c("ClusVar_Def", "timeVar", stratifiers_Def)
+  datStrata_Perf <- copy(datCredit_train[PerfSpell_Counter==1, ..selectionVar_train_Perf][, list(Freq = .N), by=stratifiers_Perf])
+  datStrata_Def <- copy(datCredit_train[DefSpell_Counter==1, ..selectionVar_train_Def][, list(Freq = .N), by=stratifiers_Def])
+  
+  # - Aesthetics engineering
+  datStrata_Perf[, Facet_label := "Strata Frequency Analysis (Performance Spells)"]
+  datStrata_Def[, Facet_label := "Strata Frequency Analysis (Default Spells)"]
+  
+  # - Create summaries for annotations within graph
+  datStrata_aggr_Perf <- datStrata_Perf[, list(StratumSize_N = .N, StratumSize_Min = min(Freq,na.rm=T), StratumSize_Mean = mean(Freq,na.rm=T),
+                                               StratumSize_SD = sd(Freq,na.rm=T))]
+  datStrata_aggr_Perf[, StrataSize_Margin := qnorm(1-(1-confLevel)/2) * datStrata_aggr_Perf$StratumSize_SD / sqrt(datStrata_aggr_Perf$StratumSize_N)]
+  datStrata_aggr_Def <- datStrata_Def[, list(StratumSize_N = .N, StratumSize_Min = min(Freq,na.rm=T), StratumSize_Mean = mean(Freq,na.rm=T),
+                                               StratumSize_SD = sd(Freq,na.rm=T))]
+  datStrata_aggr_Def[, StrataSize_Margin := qnorm(1-(1-confLevel)/2) * datStrata_aggr_Def$StratumSize_SD / sqrt(datStrata_aggr_Def$StratumSize_N)]
+  
+  # - Graphing parameters
+  chosenFont <- "Cambria"; dpi <- 180
+  col.v <- brewer.pal(8, "Dark2") # [1:length(targetVars_Perf)]
+  fill.v <- brewer.pal(8, "Set2") # [1:length(targetVars_Perf)]
+  x_pos_Perf <- min(as.vector(data.table(datStrata_Perf[,..stratifiers_Perf])[,1])[[1]]) + round((max(as.vector(data.table(datStrata_Perf[,..stratifiers_Perf])[,1])[[1]]) - min(as.vector(data.table(datStrata_Perf[,..stratifiers_Perf])[,1])[[1]]))/2) # x-position fot the annotation
+  x_pos_Def <- min(as.vector(data.table(datStrata_Def[,..stratifiers_Def])[,1])[[1]]) + round((max(as.vector(data.table(datStrata_Def[,..stratifiers_Def])[,1])[[1]]) - min(as.vector(data.table(datStrata_Def[,..stratifiers_Def])[,1])[[1]]))/2) # x-position fot the annotation
+  
+  # - Create graph to evidence minimum strata sizes for PERFORMANCE SPELLS
+  (g1 <- ggplot(datStrata_Perf[get(stratifiers_Perf[1])>=minDate & get(stratifiers_Perf[1])<=maxDate,], aes(x=get(stratifiers_Perf[1]), y=Freq)) + theme_minimal() + 
+      labs(x=bquote("Date "*italic(t)), y=bquote("Proporionate volume stratifiers (%) within "*italic(D[T])~"("*.(round(datCredit_train[!is.na(ClusVar_Perf),.N]/1000))*"k)")) + 
+      theme(text=element_text(family=chosenFont),legend.position = "bottom",
+            axis.text.x=element_text(angle=90), #legend.text=element_text(family=chosenFont), 
+            strip.background=element_rect(fill="snow2", colour="snow2"),
+            strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) +
+      # Creating conditional geoms based on the number of stratification variables used
+      {if (length(stratifiers_Perf)>1){
+        # main bar graph
+        list(geom_bar(position="stack", stat="identity", aes(colour=get(stratifiers_Perf[-1]), fill=get(stratifiers_Perf[-1]))),
+             # scale options
+             scale_colour_manual(name=stratifiers_Perf[-1], values=col.v), # name="Resolution type", values=col.v),
+             scale_fill_manual(name=stratifiers_Perf[-1], values=fill.v)) # name="Resolution type", values=fill.v)) 
+      } else {
+        # main bar graph
+        list(geom_bar(position="stack", stat="identity", colour=col.v[1], fill=fill.v[1]))
+      }} +
+      # annotations
+      annotate("text", x=x_pos_Perf, y=Inf, size=3, hjust=0.5, vjust=4, family=chosenFont,
+               label=paste0(datStrata_aggr_Perf$StratumSize_N, " total strata with a mean cell size of ", 
+                            comma(datStrata_aggr_Perf$StratumSize_Mean, accuracy=0.1),
+                            " ± ", sprintf("%.1f", datStrata_aggr_Perf$StrataSize_Margin), " and a minimum size of ", 
+                            sprintf("%.0f", datStrata_aggr_Perf$StratumSize_Min))) + 
+      # Rest of the facet & scale options
+      facet_grid(Facet_label ~ .) + 
+      scale_y_continuous(breaks=pretty_breaks(), label=comma) + 
+      scale_x_date(date_breaks=paste0(6, " month"), date_labels = "%b %Y"))
+  
+  # - Save graph
+  ggsave(g1, file=paste0(genFigPath_Res_anc, "StrataDesign_Train_Perf_", round(datCredit_smp[,.N]/1000),"k.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
+  
+  # - Create graph to evidence minimum strata sizes for DEFAULT SPELLS
+  (g2 <- ggplot(datStrata_Def[get(stratifiers_Def[1])>=minDate & get(stratifiers_Def[1])<=maxDate,], aes(x=get(stratifiers_Def[1]), y=Freq)) + theme_minimal() + 
+      labs(x=bquote("Date "*italic(t)), y=bquote("Proporionate volume stratifiers (%) within "*italic(D[T])~"("*.(round(datCredit_train[!is.na(ClusVar_Def),.N]/1000))*"k)")) + 
+      theme(text=element_text(family=chosenFont),legend.position = "bottom",
+            axis.text.x=element_text(angle=90), #legend.text=element_text(family=chosenFont), 
+            strip.background=element_rect(fill="snow2", colour="snow2"),
+            strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) +
+      # Creating conditional geoms based on the number of stratification variables used
+      {if (length(stratifiers_Perf)>1){
+        # main bar graph
+        list(geom_bar(position="stack", stat="identity", aes(colour=get(stratifiers_Def[-1]), fill=get(stratifiers_Def[-1]))),
+             # scale options
+             scale_colour_manual(name=stratifiers_Def[-1], values=col.v), # name="Resolution type", values=col.v), 
+             scale_fill_manual(name=stratifiers_Def[-1], values=fill.v)) # name="Resolution type", values=fill.v))
+      } else {
+        # main bar graph
+        list(geom_bar(position="stack", stat="identity", colour=col.v[1], fill=fill.v[1]))
+      }} +
+      # annotations
+      annotate("text", x=x_pos_Def, y=Inf, size=3, hjust=0.5, vjust=4, family=chosenFont,
+               label=paste0(datStrata_aggr_Def$StratumSize_N, " total strata with a mean cell size of ", 
+                            comma(datStrata_aggr_Def$StratumSize_Mean, accuracy=0.1),
+                            " ± ", sprintf("%.1f", datStrata_aggr_Def$StrataSize_Margin), " and a minimum size of ", 
+                            sprintf("%.0f", datStrata_aggr_Def$StratumSize_Min))) + 
+      # Rest of the facet & scale options
+      facet_grid(Facet_label ~ .) + 
+      scale_y_continuous(breaks=pretty_breaks(), label=comma) + 
+      scale_x_date(date_breaks=paste0(6, " month"), date_labels = "%b %Y"))
+  
+  # - Save graph
+  ggsave(g2, file=paste0(genFigPath_Res_anc, "StrataDesign_Train_Def_", round(datCredit_smp[,.N]/1000),"k.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
+  
+  
+  # --- Clean up
+  rm(datStrata_Perf, datStrata_Def, datStrata_aggr_Perf, datStrata_aggr_Def, col.v, fill.v, chosenFont, dpi)
+}
+
+
+
+# ------ 5. Graphing the main event rate (12-month conditional default rate) over time given resampled subsample
+# - Check representatives | dataset-level proportions should be similar
+datCredit[CurStatus==0, ..targetVar] %>% table() %>% prop.table()
+datCredit_train[CurStatus==0, ..targetVar] %>% table() %>% prop.table()
+datCredit_valid[CurStatus==0, ..targetVar] %>% table() %>% prop.table()
+
+# - Setting some aggregation parameters, purely to facilitate graphing aesthetics
+StartDte <- min(datCredit_smp$timeVar, na.rm=T)
+EndDte <- max(datCredit_smp$timeVar, na.rm=T)
+maxDate <- EndDte - years(1) # A post-hoc filter, used for graphing purposes, given a 12-month outcome window (scenario specific)
+minDate <- StartDte
+x_pos <- min(datCredit$timeVar) + round((max(datCredit$timeVar) - min(datCredit$timeVar))/2) # x-position fot the annotation
+
+# - Aggregate to monthly level and observe up to given point
+# Aggregation for main target event (maximum time imposed to cater for the last 12-months)
+port.aggr <- datGraph[CurStatus==0, sum(get(targetVar), na.rm=T)/.N, by=list(Sample, timeVar)][timeVar >= StartDte & timeVar <= maxDate,] %>% setkey(timeVar)
+# Renaming the column containing the conditional event rate
+colnames(port.aggr)[3] <- targetVar
+# Creating a faceting label
+port.aggr[, Facet:="Worst-ever aggregation approach"]
+# - Calculate MAE over time by sample, by target event
+port.aggr2 <- port.aggr %>% pivot_wider(id_cols = c(timeVar), names_from = c(Sample), values_from = targetVar) %>% as.data.table()
+
+# - Initiating the annotation dataset
+dat_anno <- data.table(MAE = rep(0,4),
+                       Mean_EventRate = rep(0, 4),
+                       stdError_EventRate = rep(0, 4),
+                       margin_EventRate = rep(0, 4),
+                       name = rep(targetVar,4),
+                       Dataset = c("A-B","A-C","B-C", "B"),
+                       Label = c(paste0("'MAE between '*italic(A[t])*' and '*italic(B[t])*'"),
+                                 paste0("'MAE between '*italic(A[t])*' and '*italic(C[t])*'"),
+                                 paste0("'MAE between '*italic(B[t])*' and '*italic(C[t])*'"), 
+                                 paste0("'TTC-mean '*E(italic(B[t]))*'")),
+                       x = rep(x_pos,4),
+                       y = rep(Inf, 4), # c(0.06,0.0585, 0.0570, 0.0540),
+                       vjust = c(2,3,4.5,5),
+                       hjust=rep(0.5,4))
+# - Getting the column names to help compute the MAEs
+colnames <- colnames(port.aggr2)
+# - Populating the annotation dataset
+dat_anno[1, MAE := mean(abs(port.aggr2[,2][[1]] - port.aggr2[,3][[1]]), na.rm = T)] # MAE between the full- and training dataset
+dat_anno[2, MAE := mean(abs(port.aggr2[,2][[1]] - port.aggr2[,4][[1]]), na.rm = T)] # MAE between the training- and validation dataset
+dat_anno[3, MAE := mean(abs(port.aggr2[,3][[1]] - port.aggr2[,4][[1]]), na.rm = T)] # MAE between the training- and validation dataset
+dat_anno[4, mean_EventRate := mean(port.aggr2[,3][[1]], na.rm=T)]
+dat_anno[4, stdError_EventRate := sd(port.aggr2[,3][[1]], na.rm=T)/ sqrt(length(port.aggr2[,3][[1]]))]
+
+# - Last adjustments to the annotation dataset before plotting
+dat_anno[4, margin_EventRate := qnorm(1-(1-confLevel)/2) * stdError_EventRate]
+dat_anno[4, Label := paste0(Label, " = ", sprintf("%.2f", mean_EventRate*100) , "% +-", sprintf("%.3f", margin_EventRate*100), "%'")]
+dat_anno[1:3, Label := paste0(Label, " = ", sprintf("%.4f",MAE*100), "%'")]
+
+# - Graphing parameters
+chosenFont <- "Cambria"; dpi <- 170
+col.v <- brewer.pal(9, "Set1")
+label.v <- c("a_Full"=expression(italic(A)[t]*": Full set "*italic(D)),
+             "b_Train"=bquote(italic(B)[t]*": Training set "*italic(D)[italic(T)]~"("*.(round(datCredit_train[,.N]/1000))*"k)"),
+             "c_Valid"=bquote(italic(C)[t]*": Validation set "*italic(D)[italic(V)]~"("*.(round(datCredit_valid[,.N]/1000))*"k)"))
+
+# - Create graph 1 (all sets)
+(g3 <- ggplot(port.aggr[timeVar>=minDate & timeVar<=maxDate,], aes(x=timeVar, y=get(targetVar))) + theme_minimal() + 
+    labs(x="Reporting date (months)", y=bquote("Conditional incidence rate (%) across sample "*italic(bar(D)))) + 
+    theme(text=element_text(family=chosenFont),legend.position = "bottom",
+          axis.text.x=element_text(angle=90), #legend.text=element_text(family=chosenFont), 
+          strip.background=element_rect(fill="snow2", colour="snow2"),
+          strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) + 
+    # main line graph with overlaid points
+    geom_line(aes(colour=Sample, linetype=Sample)) + 
+    geom_point(aes(colour=Sample, shape=Sample), size=1) + 
+    # facets
+    facet_wrap(.~Facet, scales = "free", strip.position="right") + 
+    #annotations
+    geom_text(data=dat_anno, aes(x=x, y=y, hjust=hjust, vjust=vjust, label = Label), family=chosenFont, size=3, parse=T) + 
+    # scale options
+    scale_colour_manual(name=bquote("Sample "*italic(bar(D))), values=col.v, labels=label.v) + 
+    scale_shape_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + scale_linetype_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + 
+    scale_y_continuous(breaks=pretty_breaks(), label=percent) + 
+    scale_x_date(date_breaks=paste0(6, " month"), date_labels = "%b %Y"))
+
+# - Save graph
+ggsave(g3, file=paste0(genFigPath_Res_anc, "DefaultRate_Adv_Subsample-", round(datCredit_smp[,.N]/1000),"k.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
+
+# - Cleanup
+rm(dat_anno, chosenFont, col.v, label.v, colnames, port.aggr, port.aggr2, maxDate, minDate)
+
+
+
+
+# ------ 6. Graphing performance spell resolution rates over time given resampled | Spell entry time (t_e)
+# - Check representatives | dataset-level proportions should be similar
+datCredit[PerfSpell_Counter==1, get(resolPerf)] %>% table() %>% prop.table()
+datCredit_train[PerfSpell_Counter==1, get(resolPerf)] %>% table() %>% prop.table()
+datCredit_valid[PerfSpell_Counter==1, get(resolPerf)] %>% table() %>% prop.table()
+# Checking the proportions of the subsampled dataset and creating the corresponding faceting labels
+(Facet_Label_Perf <- datCredit_smp[PerfSpell_Counter==1, get(resolPerf)] %>% table() %>% prop.table() %>% data.table()) # Saving these proportions as they are used in the facets
+colnames(Facet_Label_Perf) <- c("PerfSpell_Resol", "Prior") # Renaming the columns
+
+# - Subsetting the main long dataset to only include the necessary variables for performance spells
+datGraph_Perf <- datGraph %>% subset(!is.na(ClusVar_Perf), select = c("ClusVar_Perf", "timeVar", "timeVar_Perf_Min", resolPerf, "Sample"))
+colnames(datGraph_Perf) <- c("ClusVar_Perf", "timeVar", "timeVar_Perf_Min", "PerfSpell_Resol", "Sample")
+
+# - Setting some aggregation parameters, purely to facilitate graphing aesthetics
+StartDte <- min(datCredit_smp$timeVar, na.rm=T)
+EndDte <- max(datCredit_smp$timeVar, na.rm=T)
+maxDate <- EndDte # A post-hoc filter, used for graphing purposes - left as the end of the sampling window
+minDate <- StartDte %m+% months(1) # A post-hoc filter, used for graphing purposes - set as one month after the sampling window
+x_pos <- min(datCredit$timeVar) + round((max(datCredit$timeVar) - min(datCredit$timeVar))/2) # x-position fot the annotation
+
+# - Aggregate to monthly level and observe up to given point
+port.aggr_perf <- merge(datGraph_Perf[timeVar==timeVar_Perf_Min, list(Sum_Total = .N), by=list(Sample,timeVar)],
+                        datGraph_Perf[timeVar==timeVar_Perf_Min, list(Sum_Resol = .N), by=list(Sample,timeVar,PerfSpell_Resol)],
+                        by=c("Sample", "timeVar"))[timeVar >= minDate & timeVar <= maxDate,]
+port.aggr_perf[, Prop := Sum_Resol/Sum_Total]
+
+# - Calculate MAE over time by sample, by performance event(s)
+port.aggr_perf2 <- port.aggr_perf %>% pivot_wider(id_cols = c(timeVar), names_from = c(Sample, PerfSpell_Resol), values_from = Prop) %>% data.table()
+
+# - Get the unique factors of the performance spell resolution type (used as facets)
+resolPerf_levels <- unique(datCredit[!is.na(get(resolPerf)), get(resolPerf)])
+# - Number of annotations "sets" to create
+anno_n <- length(resolPerf_levels)
+# - Initiating the annotation dataset
+dat_anno_perf <- data.table(MAE = rep(0,anno_n*3),
+                            Mean_EventRate = rep(0, anno_n*3),
+                            stdError_EventRate = rep(0, anno_n*3),
+                            margin_EventRate = rep(0, anno_n*3),
+                            PerfSpell_Resol = unlist(lapply(resolPerf_levels, function(x){rep(x,3)})),
+                            Dataset = rep(c("A-B","A-C","B-C"), anno_n),
+                            Label = rep(c(paste0("'MAE between '*italic(A[t])*' and '*italic(B[t])*'"),
+                                          paste0("'MAE between '*italic(A[t])*' and '*italic(C[t])*'"),
+                                          paste0("'MAE between '*italic(B[t])*' and '*italic(C[t])*'")),
+                                        anno_n),
+                            x = rep(x_pos,anno_n*3),
+                            y = rep(Inf, anno_n*3), # c(c(0.9,0.83,0.76),c(0.6,0.55,0.5),c(0.9,0.83,0.76)),
+                            vjust = rep(c(1,2,3), anno_n),
+                            hjust=rep(0.5, anno_n*3))
+# - Getting the column names to help compute the MAEs
+colnames <- colnames(port.aggr_perf2)
+# - Populating the annotation dataset
+for (i in 1:anno_n){
+  dat_anno_perf[i*3-2, MAE := mean(abs(subset(port.aggr_perf2, select=colnames[colnames %in% paste0("a_Full_", resolPerf_levels[i])])[[1]] - subset(port.aggr_perf2, select=colnames[colnames %in% paste0("b_Train_", resolPerf_levels[i])])[[1]]), na.rm = T)] # MAE between the full- and training dataset
+  dat_anno_perf[i*3-1, MAE := mean(abs(subset(port.aggr_perf2, select=colnames[colnames %in% paste0("a_Full_", resolPerf_levels[i])])[[1]] - subset(port.aggr_perf2, select=colnames[colnames %in% paste0("c_Valid_", resolPerf_levels[i])])[[1]]), na.rm = T)] # MAE between the full- and validation dataset
+  dat_anno_perf[i*3, MAE := mean(abs(subset(port.aggr_perf2, select=colnames[colnames %in% paste0("b_Train_", resolPerf_levels[i])])[[1]] - subset(port.aggr_perf2, select=colnames[colnames %in% paste0("c_Valid_", resolPerf_levels[i])])[[1]]), na.rm = T)] # MAE between the training- and validation dataset
+}
+# - Finessing the annotation dataset for plotting
+dat_anno_perf[, Label := paste0(Label, " = ", sprintf("%.4f",MAE*100), "%'")]
+# - Adding an column to accommodate the facets
+port.aggr_perf <- merge(port.aggr_perf, Facet_Label_Perf, by="PerfSpell_Resol")
+port.aggr_perf[, Facet:=paste0('"', PerfSpell_Resol, ' (', sprintf("%.2f", Prior*100), '%)"')]
+dat_anno_perf <- merge(dat_anno_perf, unique(subset(port.aggr_perf, select=c("PerfSpell_Resol", "Facet"))), by="PerfSpell_Resol")
+
+# - Graphing parameters
+chosenFont <- "Cambria"; dpi <- 340
+col.v <- brewer.pal(9, "Set1")
+label.v <- c("a_Full"=expression(italic(A)[t]*": Full set "*italic(D)),
+             "b_Train"=bquote(italic(B)[t]*": Training set "*italic(D)[italic(T)]~"("*.(round(datCredit_train[,.N]/1000))*"k)"),
+             "c_Valid"=bquote(italic(C)[t]*": Validation set "*italic(D)[italic(V)]~"("*.(round(datCredit_valid[,.N]/1000))*"k)"))
+
+# - Create graph
+(g4 <- ggplot(port.aggr_perf, aes(x=timeVar, y=Prop)) + theme_minimal() + 
+    labs(x=bquote("Performing spell cohorts (ccyymm): entry time "*italic(t[e])), y=bquote("Resolution rate (%) of type "*~italic(kappa))) +
+    theme(text=element_text(family=chosenFont),legend.position = "bottom",
+          axis.text.x=element_text(angle=90), #legend.text=element_text(family=chosenFont), 
+          strip.background=element_rect(fill="snow2", colour="snow2"),
+          strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) + 
+    # main line graph with overlaid points
+    geom_line(aes(colour=Sample, linetype=Sample)) + 
+    geom_point(aes(colour=Sample, shape=Sample), size=1) + 
+    # facets
+    facet_wrap(Facet~., labeller = label_parsed, scales = "free", nrow=length(resolPerf_levels), strip.position="right") + 
+    #annotations
+    geom_text(data=dat_anno_perf, aes(x=x, y=y, hjust=hjust, vjust=vjust, label = Label), family=chosenFont, size=3, parse=T) + 
+    # scale options
+    scale_colour_manual(name=bquote("Sample "*italic(bar(D))), values=col.v, labels=label.v) + 
+    scale_shape_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + scale_linetype_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + 
+    scale_y_continuous(breaks=pretty_breaks(), label=percent) + 
+    scale_x_date(date_breaks=paste0(6, " month"), date_labels = "%b %Y"))
+
+# - Save graph
+ggsave(g4, file=paste0(genFigPath_Res_anc, "ResolutionRates_Perf_te_Adv_Subsample-", round(datCredit_smp[,.N]/1000),"k.png"), width=5000/(dpi*2.25), height=4000/(dpi*1.4), dpi=dpi, bg="white")
+
+# - Cleanup
+rm(dat_anno_perf, resolPerf_levels, chosenFont, col.v, label.v, colnames, datGraph_Perf, port.aggr_perf, port.aggr_perf2, maxDate, minDate, Facet_Label_Perf)
+
+
+
+
+# ------ 7. Graphing default spell resolution rates over time given resampled | Spell entry time (t_e)
+# - Check representatives | dataset-level proportions should be similar
+datCredit[DefSpell_Counter==1, get(resolDef)] %>% table() %>% prop.table()
+datCredit_train[DefSpell_Counter==1, get(resolDef)] %>% table() %>% prop.table()
+datCredit_valid[DefSpell_Counter==1, get(resolDef)] %>% table() %>% prop.table()
+# Checking the proportions of the subsampled dataset and creating the corresponding faceting labels
+(Facet_Label_Def <- datCredit_smp[DefSpell_Counter==1, get(resolDef)] %>% table() %>% prop.table() %>% data.table()) # Saving these proportions as they are used in the facets
+colnames(Facet_Label_Def) <- c("DefSpell_Resol", "Prior") # Renaming the columns
+
+# - Subsetting the main long dataset to only include the necessary variables for performance spells
+datGraph_Def <- datGraph %>% subset(!is.na(ClusVar_Def), select = c("ClusVar_Def", "timeVar", "timeVar_Def_Min", "timeVar_Def_Min", resolDef, "Sample"))
+colnames(datGraph_Def) <- c("ClusVar_Def", "timeVar", "timeVar_Def_Min", "timeVar_Def_Min", "DefSpell_Resol", "Sample")
+
+# - Setting some aggregation parameters, purely to facilitate graphing aesthetics
+maxDate <- EndDte # A post-hoc filter, used for graphing purposes - left as the end of the sampling window
+minDate <- StartDte # %m+% months(1) # A post-hoc filter, used for graphing purposes - set as one month after the sampling window
+x_pos <- min(datCredit$timeVar) + round((max(datCredit$timeVar) - min(datCredit$timeVar))/2) # x-position fot the annotation
+
+# - Aggregate to monthly level and observe up to given point
+port.aggr_def <- merge(datGraph_Def[timeVar==timeVar_Def_Min, list(Sum_Total = .N), by=list(Sample,timeVar)],
+                       datGraph_Def[timeVar==timeVar_Def_Min, list(Sum_Resol = .N), by=list(Sample,timeVar,DefSpell_Resol)],
+                       by=c("Sample", "timeVar"))[timeVar >= minDate & timeVar <= maxDate,]
+port.aggr_def[, Prop := Sum_Resol/Sum_Total]
+
+# - Calculate MAE over time by sample, by competing event(s)
+port.aggr_def2 <- port.aggr_def %>% pivot_wider(id_cols = c(timeVar), names_from = c(Sample, DefSpell_Resol), values_from = Prop) %>% as.data.table()
+
+# - Get the unique factors of the default spell resolution type (used as facets)
+resolDef_levels <- unique(datCredit[!is.na(get(resolDef)), get(resolDef)])
+# - Number of annotations "sets" to create
+anno_n <- length(resolDef_levels)
+
+# - Initiating the annotation dataset
+dat_anno_def <- data.table(MAE = rep(0,anno_n*3),
+                           Mean_EventRate = rep(0, anno_n*3),
+                           stdError_EventRate = rep(0, anno_n*3),
+                           margin_EventRate = rep(0, anno_n*3),
+                           DefSpell_Resol = unlist(lapply(resolDef_levels, function(x){rep(x,3)})),
+                           Dataset = rep(c("A-B","A-C","B-C"), anno_n),
+                           Label = rep(c(paste0("'MAE between '*italic(A[t])*' and '*italic(B[t])*'"),
+                                         paste0("'MAE between '*italic(A[t])*' and '*italic(C[t])*'"),
+                                         paste0("'MAE between '*italic(B[t])*' and '*italic(C[t])*'")),
+                                       anno_n),
+                           x = rep(x_pos,anno_n*3),
+                           y = rep(Inf, anno_n*3), # c(c(0.4,0.35,0.3),c(0.55,0.525,0.5),c(0.9,0.85,0.8)),
+                           vjust = rep(c(1,2,3), anno_n),
+                           hjust=rep(0.5, anno_n*3))
+# - Getting the column names to help compute the MAEs
+colnames <- colnames(port.aggr_def2)
+# - Populating the annotation dataset
+for (i in 1:anno_n){
+  dat_anno_def[i*3-2, MAE := mean(abs(subset(port.aggr_def2, select=colnames[colnames %in% paste0("a_Full_", resolDef_levels[i])])[[1]] - subset(port.aggr_def2, select=colnames[colnames %in% paste0("b_Train_", resolDef_levels[i])])[[1]]), na.rm = T)] # MAE between the full- and training dataset
+  dat_anno_def[i*3-1, MAE := mean(abs(subset(port.aggr_def2, select=colnames[colnames %in% paste0("a_Full_", resolDef_levels[i])])[[1]] - subset(port.aggr_def2, select=colnames[colnames %in% paste0("c_Valid_", resolDef_levels[i])])[[1]]), na.rm = T)] # MAE between the full- and validation dataset
+  dat_anno_def[i*3, MAE := mean(abs(subset(port.aggr_def2, select=colnames[colnames %in% paste0("b_Train_", resolDef_levels[i])])[[1]] - subset(port.aggr_def2, select=colnames[colnames %in% paste0("c_Valid_", resolDef_levels[i])])[[1]]), na.rm = T)] # MAE between the training- and validation dataset
+}
+# - Finessing the annotation dataset for plotting
+dat_anno_def[, Label := paste0(Label, " = ", sprintf("%.4f",MAE*100), "%'")]
+# - Adding an column to accommodate the facets
+port.aggr_def <- merge(port.aggr_def, Facet_Label_Def, by="DefSpell_Resol")
+port.aggr_def[, Facet:=paste0('"', DefSpell_Resol, ' (', sprintf("%.2f", Prior*100), '%)"')]
+dat_anno_def <- merge(dat_anno_def, unique(subset(port.aggr_def, select=c("DefSpell_Resol", "Facet"))), by="DefSpell_Resol")
+
+
+# - Graphing parameters
+chosenFont <- "Cambria"; dpi <- 340
+col.v <- brewer.pal(9, "Set1")
+label.v <- c("a_Full"=expression(italic(A)[t]*": Full set "*italic(D)),
+             "b_Train"=bquote(italic(B)[t]*": Training set "*italic(D)[italic(T)]~"("*.(round(datCredit_train[,.N]/1000))*"k)"),
+             "c_Valid"=bquote(italic(C)[t]*": Validation set "*italic(D)[italic(V)]~"("*.(round(datCredit_valid[,.N]/1000))*"k)"))
+
+# - Create graph
+(g5 <- ggplot(port.aggr_def, aes(x=timeVar, y=Prop)) + theme_minimal() + 
+    labs(x=bquote("Default spell cohorts (ccyymm): entry time "*italic(t[e])), y=bquote("Resolution rate (%) of type "*~italic(kappa))) +
+    theme(text=element_text(family=chosenFont),legend.position = "bottom",
+          axis.text.x=element_text(angle=90), #legend.text=element_text(family=chosenFont), 
+          strip.background=element_rect(fill="snow2", colour="snow2"),
+          strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) + 
+    # main line graph with overlaid points
+    geom_line(aes(colour=Sample, linetype=Sample)) + 
+    geom_point(aes(colour=Sample, shape=Sample), size=1) + 
+    # facets
+    facet_wrap(Facet~., labeller = label_parsed, scales = "free", nrow=length(resolDef_levels), strip.position="right") + 
+    #annotations
+    geom_text(data=dat_anno_def, aes(x=x, y=y, hjust=hjust, vjust=vjust, label = Label), family=chosenFont, size=3, parse=T) + 
+    # scale options
+    scale_colour_manual(name=bquote("Sample "*italic(bar(D))), values=col.v, labels=label.v) + 
+    scale_shape_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + scale_linetype_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + 
+    scale_y_continuous(breaks=pretty_breaks(), label=percent) + 
+    scale_x_date(date_breaks=paste0(6, " month"), date_labels = "%b %Y"))
+
+# - Save graph
+ggsave(g5, file=paste0(genFigPath_Res_anc, "ResolutionRates_Def_te_Subsample-", round(datCredit_smp[,.N]/1000),"k.png"), width=5000/(dpi*2.25), height=4000/(dpi*1.4), dpi=dpi, bg="white")
+
+# - Cleanup
+rm(dat_anno_def, chosenFont, col.v, label.v, colnames, datGraph_Def, port.aggr_def, port.aggr_def2, maxDate, minDate)
+
+
+
+
+# ------ 8. Graphing performance spell resolution rates over time given resampled sets | Spell stop time (t_s)
+# - Check representatives | dataset-level proportions should be similar
+datCredit[timeVar==timeVar_Perf_Max, get(resolPerf_stop)] %>% table() %>% prop.table()
+datCredit_train[timeVar==timeVar_Perf_Max, get(resolPerf_stop)] %>% table() %>% prop.table()
+datCredit_valid[timeVar==timeVar_Perf_Max, get(resolPerf_stop)] %>% table() %>% prop.table()
+# Checking the proportions of the subsampled dataset and creating the corresponding faceting labels
+(Facet_Label_Perf <- datCredit_smp[timeVar==timeVar_Perf_Max, get(resolPerf_stop)] %>% table() %>% prop.table() %>% data.table()) # Saving these proportions as they are used in the facets
+colnames(Facet_Label_Perf) <- c("PerfSpell_Resol_Stop", "Prior") # Renaming the columns
+# - Subsetting the main long dataset to only include the necessary variables for performance spells
+datGraph_Perf <- datGraph %>% subset (!is.na(clusVar_Perf), select=c("ClusVar_Perf", "timeVar", "timeVar_Perf_Max", resolPerf_stop, "Sample"))
+colnames(datGraph_Perf) <- c("ClusVar_Perf", "timeVar", "timeVar_Perf_Max", "PerfSpell_Resol_Stop", "Sample")
+
+# - Setting some aggregation parameters, purely to facilitate graphing aesthetics
+StartDte <- min(datCredit_smp$timeVar, na.rm=T)
+EndDte <- max(datCredit_smp$timeVar, na.rm=T)
+maxDate <- EndDte %m-% months(1)# A post-hoc filter, used for graphing purposes - left as the end of the sampling window
+minDate <- StartDte # %m+% months(1) # A post-hoc filter, used for graphing purposes - set as one month after the sampling window
+
+# - Aggregate to monthly level and observe up to given point
+port.aggr_perf <- merge(datGraph_Perf[timeVar==timeVar_Perf_Max, list(Sum_Total = .N), by=list(Sample,timeVar)],
+                        datGraph_Perf[timeVar==timeVar_Perf_Max, list(Sum_Resol = .N), by=list(Sample,timeVar,PerfSpell_Resol_Stop)],
+                        by=c("Sample", "timeVar"))[timeVar >= minDate & timeVar <= maxDate,]
+port.aggr_perf[, Prop := Sum_Resol/Sum_Total]
+
+# - Calculate MAE over time by sample, by performance event(s)
+port.aggr_perf2 <- port.aggr_perf %>% pivot_wider(id_cols = c(timeVar), names_from = c(Sample, PerfSpell_Resol_Stop), values_from = Prop) %>% data.table()
+
+# - Get the unique factors of the performance spell resolution type (used as facets)
+resolPerf_levels <- unique(datCredit[!is.na(get(resolPerf_stop)), get(resolPerf_stop)])
+# - Number of annotations "sets" to create
+anno_n <- length(resolPerf_levels)
+# - Initiating the annotation dataset
+x_pos <- min(datCredit$timeVar) + round((max(datCredit$timeVar) - min(datCredit$timeVar))/2) # x-position fot the annotation
+dat_anno_perf <- data.table(MAE = rep(0,anno_n*4),
+                            Mean_EventRate = rep(0, anno_n*4),
+                            stdError_EventRate = rep(0, anno_n*4),
+                            margin_EventRate = rep(0, anno_n*4),
+                            PerfSpell_Resol_Stop = unlist(lapply(resolPerf_levels, function(x){rep(x,4)})),
+                            Dataset = rep(c("A-B","A-C","B-C", "B"), anno_n),
+                            Label = rep(c(paste0("'MAE between '*italic(A[t])*' and '*italic(B[t])*'"),
+                                          paste0("'MAE between '*italic(A[t])*' and '*italic(C[t])*'"),
+                                          paste0("'MAE between '*italic(B[t])*' and '*italic(C[t])*'"), 
+                                          paste0("'TTC-mean '*E(italic(B[t]))*'")), anno_n),
+                            x = rep(x_pos,anno_n*4),
+                            y = rep(Inf, anno_n*4), # c(c(0.48,0.45,0.42,0.38),c(0.65,0.62,0.59,0.55)),
+                            vjust = rep(c(1,2,3, 4), anno_n),
+                            hjust=rep(0.5, anno_n*4))
+# - Getting the column names to help compute the MAEs
+colnames <- colnames(port.aggr_perf2)
+# - Populating the annotation dataset
+for (i in 1:anno_n){
+  dat_anno_perf[i*4-3, MAE := mean(abs(subset(port.aggr_perf2, select=colnames[colnames %in% paste0("a_Full_", resolPerf_levels[i])])[[1]] - subset(port.aggr_perf2, select=colnames[colnames %in% paste0("b_Train_", resolPerf_levels[i])])[[1]]), na.rm = T)] # MAE between the full- and training dataset
+  dat_anno_perf[i*4-2, MAE := mean(abs(subset(port.aggr_perf2, select=colnames[colnames %in% paste0("a_Full_", resolPerf_levels[i])])[[1]] - subset(port.aggr_perf2, select=colnames[colnames %in% paste0("c_Valid_", resolPerf_levels[i])])[[1]]), na.rm = T)] # MAE between the full- and validation dataset
+  dat_anno_perf[i*4-1, MAE := mean(abs(subset(port.aggr_perf2, select=colnames[colnames %in% paste0("b_Train_", resolPerf_levels[i])])[[1]] - subset(port.aggr_perf2, select=colnames[colnames %in% paste0("c_Valid_", resolPerf_levels[i])])[[1]]), na.rm = T)] # MAE between the training- and validation dataset
+  dat_anno_perf[i*4,   mean_EventRate := mean(subset(port.aggr_perf2, select=colnames[colnames %in% paste0("b_Train_", resolPerf_levels[i])])[[1]], na.rm=T)]
+  dat_anno_perf[i*4,   stdError_EventRate := sd(subset(port.aggr_perf2, select=colnames[colnames %in% paste0("b_Train_", resolPerf_levels[i])])[[1]], na.rm=T)/ sqrt(length(subset(port.aggr_perf2, select=colnames[colnames %in% paste0("b_Train_", resolPerf_levels[i])])[[1]]))]
+}
+
+mean(abs(port.aggr_perf2$a_Full_Defaulted - port.aggr_perf2$b_Train_Defaulted))
+mean(abs(port.aggr_perf2$a_Full_Other - port.aggr_perf2$b_Train_Other))
+
+# - Finessing the annotation dataset for plotting
+ind <- seq(from=4, to=4*anno_n, by=4)
+dat_anno_perf[ind, margin_EventRate := qnorm(1-(1-confLevel)/2) * stdError_EventRate]
+dat_anno_perf[ind, Label := paste0(Label, " = ", sprintf("%.2f", mean_EventRate*100) , "% +-", sprintf("%.3f", margin_EventRate*100), "%'")]
+dat_anno_perf[seq(from=1, to=4*anno_n)[!(seq(from=1, to=4*anno_n) %in% ind)], Label := paste0(Label, " = ", sprintf("%.4f",MAE*100), "%'")]
+# - Adding an column to accommodate the facets
+port.aggr_perf <- merge(port.aggr_perf, Facet_Label_Perf, by="PerfSpell_Resol_Stop")
+port.aggr_perf[, Facet:=paste0('"', PerfSpell_Resol_Stop, ' (', sprintf("%.2f", Prior*100), '%)"')]
+dat_anno_perf <- merge(dat_anno_perf, unique(subset(port.aggr_perf, select=c("PerfSpell_Resol_Stop", "Facet"))), by="PerfSpell_Resol_Stop")
+
+# - Graphing parameters
+chosenFont <- "Cambria"; dpi <- 340
+col.v <- brewer.pal(9, "Set1")
+label.v <- c("a_Full"=expression(italic(A)[t]*": Full set "*italic(D)),
+             "b_Train"=bquote(italic(B)[t]*": Training set "*italic(D)[italic(T)]~"("*.(round(datCredit_train[,.N]/1000))*"k)"),
+             "c_Valid"=bquote(italic(C)[t]*": Validation set "*italic(D)[italic(V)]~"("*.(round(datCredit_valid[,.N]/1000))*"k)"))
+
+# - Create graph using all facets
+(g6_1 <- ggplot(port.aggr_perf, aes(x=timeVar, y=Prop)) + theme_minimal() + 
+      labs(x=bquote("Performing spell cohorts (ccyymm): stop time "*italic(t[s])), y=bquote("Resolution rate (%) of type "*italic(kappa))) +
+      theme(text=element_text(family=chosenFont),legend.position = "bottom",
+            axis.text.x=element_text(angle=90), #legend.text=element_text(family=chosenFont), 
+            strip.background=element_rect(fill="snow2", colour="snow2"),
+            strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) + 
+      # main line graph with overlaid points
+      geom_line(aes(colour=Sample, linetype=Sample)) + 
+      geom_point(aes(colour=Sample, shape=Sample), size=1) + 
+      # facets
+      facet_wrap(Facet~., labeller = label_parsed, scales = "free", nrow=length(resolPerf_levels), strip.position="right") + 
+      # annotations
+      geom_text(data=dat_anno_perf, aes(x=x, y=y, hjust=hjust, vjust=vjust, label = Label), family=chosenFont, size=3, parse=T) + 
+      # scale options
+      scale_colour_manual(name=bquote("Sample "*italic(bar(D))), values=col.v, labels=label.v) + 
+      scale_shape_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + scale_linetype_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + 
+      scale_y_continuous(breaks=pretty_breaks(), label=percent) + 
+      scale_x_date(date_breaks=paste0(6, " month"), date_labels = "%b %Y"))
+
+# - Save graph
+ggsave(g6_1, file=paste0(genFigPath_Res_anc, "ResolutionRates_Perf_ts_Adv_Subsample-", round(datCredit_smp[,.N]/1000),"k.png"), width=5000/(dpi*2.25), height=4000/(dpi*1.4), dpi=dpi, bg="white")
+
+# - Create graph using only the first facet (conditional on the faceting variable having more than one level)
+if (!is.na(resolPerf_stop2)){
+  # Create graph
+  (g6_2 <- ggplot(port.aggr_perf[PerfSpell_Resol_Stop==resolPerf_stop2,], aes(x=timeVar, y=Prop)) + theme_minimal() + 
+      labs(x=bquote("Performing spell cohorts (ccyymm): stop time "*italic(t[s])), y=bquote("Resolution rate (%) of type "*italic(kappa))) +
+      theme(text=element_text(family=chosenFont),legend.position = "bottom",
+            axis.text.x=element_text(angle=90), #legend.text=element_text(family=chosenFont), 
+            strip.background=element_rect(fill="snow2", colour="snow2"),
+            strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) + 
+      # main line graph with overlaid points
+      geom_line(aes(colour=Sample, linetype=Sample)) + 
+      geom_point(aes(colour=Sample, shape=Sample), size=1) + 
+      # facets
+      facet_wrap(Facet~., labeller = label_parsed, scales = "free", strip.position="right") + 
+      #annotations
+      geom_text(data=dat_anno_perf[PerfSpell_Resol_Stop==resolPerf_stop2, ], aes(x=x, y=y, hjust=hjust, vjust=vjust, label = Label), family=chosenFont, size=3, parse=T) + 
+      # scale options
+      scale_colour_manual(name=bquote("Sample "*italic(bar(D))), values=col.v, labels=label.v) + 
+      scale_shape_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + scale_linetype_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + 
+      scale_y_continuous(breaks=pretty_breaks(), label=percent) + 
+      scale_x_date(date_breaks=paste0(6, " month"), date_labels = "%b %Y"))
+  
+    # Save graph
+    dpi <- 170
+    ggsave(g6_2, file=paste0(genFigPath_Res_anc, "ResolutionRates_Perf_ts_Adv_Subsample_Single_Facet-", round(datCredit_smp[,.N]/1000),"k.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
+}
+
+# - Cleanup
+rm(dat_anno_perf, resolPerf_levels, ind, chosenFont, col.v, label.v, colnames, datGraph_Perf, port.aggr_perf, port.aggr_perf2, maxDate, minDate, Facet_Label_Perf)
+
+
+
+
+# ------ 9. Graphing default spell resolution rates over time given resampled sets | Spell exit time (t_s)
+# - Check representatives | dataset-level proportions should be similar
+datCredit[timeVar==timeVar_Def_Max, get(resolDef_stop)] %>% table() %>% prop.table()
+datCredit_train[timeVar==timeVar_Def_Max, get(resolDef_stop)] %>% table() %>% prop.table()
+datCredit_valid[timeVar==timeVar_Def_Max, get(resolDef_stop)] %>% table() %>% prop.table()
+# Checking the proportions of the subsampled dataset and creating the corresponding faceting labels
+(Facet_Label_Def <- datCredit_smp[timeVar==timeVar_Def_Max, get(resolDef_stop)] %>% table() %>% prop.table() %>% data.table()) # Saving these proportions as they are used in the facets
+colnames(Facet_Label_Def) <- c("DefSpell_Resol_Stop", "Prior") # Renaming the columns
+
+# - Subsetting the main long dataset to only include the necessary variables for performance spells
+datGraph_Def <- datGraph %>% subset(!is.na(clusVar_Def), select=c("ClusVar_Def", "timeVar", "timeVar_Def_Max", resolDef_stop, "Sample"))
+colnames(datGraph_Def) <- c("ClusVar_Def", "timeVar", "timeVar_Def_Max", "DefSpell_Resol_Stop", "Sample")
+
+# - Setting some aggregation parameters, purely to facilitate graphing aesthetics
+StartDte <- min(datCredit_smp$timeVar, na.rm=T)
+EndDte <- max(datCredit_smp$timeVar, na.rm=T)
+maxDate <- EndDte # A post-hoc filter, used for graphing purposes - left as the end of the sampling window
+minDate <- StartDte # %m+% months(1) # A post-hoc filter, used for graphing purposes - set as one month after the sampling window
+
+# - Aggregate to monthly level and observe up to given point
+port.aggr_def <- merge(datGraph_Def[timeVar==timeVar_Def_Max, list(Sum_Total = .N), by=list(Sample,timeVar)],
+                       datGraph_Def[timeVar==timeVar_Def_Max, list(Sum_Resol = .N), by=list(Sample,timeVar,DefSpell_Resol_Stop)],
+                       by=c("Sample", "timeVar"))[timeVar >= minDate & timeVar <= maxDate,]
+port.aggr_def[, Prop := Sum_Resol/Sum_Total]
+
+# - Calculate MAE over time by sample, by competing event(s)
+port.aggr_def2 <- port.aggr_def %>% pivot_wider(id_cols = c(timeVar), names_from = c(Sample, DefSpell_Resol_Stop), values_from = Prop) %>% as.data.table()
+
+# - Get the unique factors of the default spell resolution type (used as facets)
+resolDef_levels <- unique(datCredit[!is.na(get(resolDef_stop)), get(resolDef_stop)])
+# - Number of annotations "sets" to create
+anno_n <- length(resolDef_levels)
+
+# - Initiating the annotation dataset
+x_pos <- min(datCredit$timeVar) + round((max(datCredit$timeVar) - min(datCredit$timeVar))/2) + months(16)# x-position fot the annotation
+dat_anno_def <- data.table(MAE = rep(0,anno_n*4),
+                           Mean_EventRate = rep(0, anno_n*4),
+                           stdError_EventRate = rep(0, anno_n*4),
+                           margin_EventRate = rep(0, anno_n*4),
+                           DefSpell_Resol_Stop = unlist(lapply(resolDef_levels, function(x){rep(x,4)})),
+                           Dataset = rep(c("A-B","A-C","B-C", "B"), anno_n),
+                           Label = rep(c(paste0("'MAE between '*italic(A[t])*' and '*italic(B[t])*'"),
+                                         paste0("'MAE between '*italic(A[t])*' and '*italic(C[t])*'"),
+                                         paste0("'MAE between '*italic(B[t])*' and '*italic(C[t])*'"), 
+                                         paste0("'TTC-mean '*E(italic(B[t]))*'")), anno_n),
+                           x = rep(x_pos,anno_n*4),
+                           y = rep(Inf, anno_n*4), # c(c(0.57,0.56,0.54,0.525),c(0.62,0.61,0.60,0.585)),
+                           vjust = rep(c(1,2,3, 4), anno_n),
+                           hjust=rep(0.5, anno_n*4))
+# - Getting the column names to help compute the MAEs
+colnames <- colnames(port.aggr_def2)
+# - Populating the annotation dataset
+for (i in 1:anno_n){
+  dat_anno_def[i*4-3, MAE := mean(abs(subset(port.aggr_def2, select=colnames[colnames %in% paste0("a_Full_", resolDef_levels[i])])[[1]] - subset(port.aggr_def2, select=colnames[colnames %in% paste0("b_Train_", resolDef_levels[i])])[[1]]), na.rm = T)] # MAE between the full- and training dataset
+  dat_anno_def[i*4-2, MAE := mean(abs(subset(port.aggr_def2, select=colnames[colnames %in% paste0("a_Full_", resolDef_levels[i])])[[1]] - subset(port.aggr_def2, select=colnames[colnames %in% paste0("c_Valid_", resolDef_levels[i])])[[1]]), na.rm = T)] # MAE between the full- and validation dataset
+  dat_anno_def[i*4-1, MAE := mean(abs(subset(port.aggr_def2, select=colnames[colnames %in% paste0("b_Train_", resolDef_levels[i])])[[1]] - subset(port.aggr_def2, select=colnames[colnames %in% paste0("c_Valid_", resolDef_levels[i])])[[1]]), na.rm = T)] # MAE between the training- and validation dataset
+  dat_anno_def[i*4,   mean_EventRate := mean(subset(port.aggr_def2, select=colnames[colnames %in% paste0("b_Train_", resolDef_levels[i])])[[1]], na.rm=T)]
+  dat_anno_def[i*4,   stdError_EventRate := sd(subset(port.aggr_def2, select=colnames[colnames %in% paste0("b_Train_", resolDef_levels[i])])[[1]], na.rm=T)/ sqrt(length(subset(port.aggr_def2, select=colnames[colnames %in% paste0("b_Train_", resolDef_levels[i])])[[1]]))]
+}
+# - Finessing the annotation dataset for plotting
+ind <- seq(from=4, to=4*anno_n, by=4)
+dat_anno_def[ind, margin_EventRate := qnorm(1-(1-confLevel)/2) * stdError_EventRate]
+dat_anno_def[ind, Label := paste0(Label, " = ", sprintf("%.2f", mean_EventRate*100) , "% +-", sprintf("%.3f", margin_EventRate*100), "%'")]
+dat_anno_def[seq(from=1, to=4*anno_n)[!(seq(from=1, to=4*anno_n) %in% ind)], Label := paste0(Label, " = ", sprintf("%.4f",MAE*100), "%'")]
+# - Adding an column to accommodate the facets
+port.aggr_def <- merge(port.aggr_def, Facet_Label_Def, by="DefSpell_Resol_Stop")
+port.aggr_def[, Facet:=paste0('"', DefSpell_Resol_Stop, ' (', sprintf("%.2f", Prior*100), '%)"')]
+dat_anno_def <- merge(dat_anno_def, unique(subset(port.aggr_def, select=c("DefSpell_Resol_Stop", "Facet"))), by="DefSpell_Resol_Stop")
+
+
+# - Graphing parameters
+chosenFont <- "Cambria"; dpi <- 340
+col.v <- brewer.pal(9, "Set1")
+label.v <- c("a_Full"=expression(italic(A)[t]*": Full set "*italic(D)),
+             "b_Train"=bquote(italic(B)[t]*": Training set "*italic(D)[italic(T)]~"("*.(round(datCredit_train[,.N]/1000))*"k)"),
+             "c_Valid"=bquote(italic(C)[t]*": Validation set "*italic(D)[italic(V)]~"("*.(round(datCredit_valid[,.N]/1000))*"k)"))
+
+# - Create graph
+(g7 <- ggplot(port.aggr_def, aes(x=timeVar, y=Prop)) + theme_minimal() + 
+    labs(x=bquote("Default spell cohorts (ccyymm): stop time "*italic(t[s])), y=bquote("Resolution rate (%) of type "*italic(kappa))) +
+    theme(text=element_text(family=chosenFont),legend.position = "bottom",
+          axis.text.x=element_text(angle=90), #legend.text=element_text(family=chosenFont), 
+          strip.background=element_rect(fill="snow2", colour="snow2"),
+          strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) + 
+    # main line graph with overlaid points
+    geom_line(aes(colour=Sample, linetype=Sample)) + 
+    geom_point(aes(colour=Sample, shape=Sample), size=1) + 
+    # facets
+    facet_wrap(Facet~., labeller = label_parsed, scales = "free", nrow=length(resolDef_levels), strip.position="right") + 
+    #annotations
+    geom_text(data=dat_anno_def, aes(x=x, y=y, hjust=hjust, vjust=vjust, label = Label), family=chosenFont, size=3, parse=T) + 
+    # scale options
+    scale_colour_manual(name=bquote("Sample "*italic(bar(D))), values=col.v, labels=label.v) + 
+    scale_shape_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + scale_linetype_discrete(name=bquote("Sample "*italic(bar(D))), labels=label.v) + 
+    scale_y_continuous(breaks=pretty_breaks(), label=percent) + 
+    scale_x_date(date_breaks=paste0(6, " month"), date_labels = "%b %Y"))
+
+# - Save graph
+ggsave(g7, file=paste0(genFigPath_Res_anc, "ResolutionRates_Def_ts_Adv_Subsample-", round(datCredit_smp[,.N]/1000),"k.png"), width=5000/(dpi*2.25), height=4000/(dpi*1.4), dpi=dpi, bg="white")
+
+# - Cleanup
+rm(dat_anno_def, ind, chosenFont, col.v, label.v, colnames, datGraph_Def, port.aggr_def, port.aggr_def2, maxDate, minDate)
+
+
+# --- Cleanup
+suppressWarnings(rm(g1, g2, g3, g4, g5,g6_1, g6_2, g7, datCredit, datCredit_smp, stratifiers_Perf, stratifiers_Def, clusVar, clusVar_Perf, clusVar_Def, timeVar, End_Dte, Start_Dte, datGraph))
