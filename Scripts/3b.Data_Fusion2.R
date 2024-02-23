@@ -275,7 +275,6 @@ if (check.fuse1 == 0) {cat('NOTE: The following fields overlap: ', overlap_flds,
 # - Remove any additional variables that are not going to be used
 suppressWarnings( datInput.raw[, `:=`(slc_status_final_pred7 = NULL, slc_status_final = NULL, 
                                       slc_curing_ind = NULL, datex = NULL)])
-
 # - Ensure variables are not present in dataset before fusion (useful during debugging)
 suppressWarnings( datCredit_smp[, `:=`(slc_pmnt_method = NULL, slc_past_due_amt = NULL, slc_days_excess = NULL,
                                        slc_status_final_pred7 = NULL, slc_status_final = NULL, slc_curing_ind = NULL,
@@ -285,49 +284,207 @@ suppressWarnings( datCredit_smp[, `:=`(slc_pmnt_method = NULL, slc_past_due_amt 
 
 # - Format the date in the correct format for merging
 datInput.raw[, date := as.Date(date, format="%Y-%m-%d")]
-
 # - Rename the datasets for merging
 colnames(datInput.raw)[colnames(datInput.raw) %in% c("date", "acct_no")] <- c("Date", "LoanID")
-
 # - Check the data grain
 data_grain_check <- datInput.raw[, list(Freq = .N), by=list(LoanID, Date)][Freq>1,]
 sum(is.na(data_grain_check$LoanID))
 # the data grain is broken in the cases where a Loan_ID does not exist - we are not interested in these accounts in any case
-
 # - Merge on LoanID and Date by performing a left-join
 datCredit_smp <- merge(datCredit_smp, datInput.raw, by=c("Date", "LoanID"), all.x=T); gc()
-
 # - Check the data grain
 NROW(data_grain_check_merge <- datCredit_smp[, list(Freq = .N), by=list(LoanID, Date)][Freq>1,])==0
 # success, the data grain check is passed
 
 # - Save intermediary snapshot to disk (zip) for quick disk-based retrieval later
 pack.ffdf(paste0(genPath,"creditdata_final_smp_a"), datCredit_smp)
-
 # - Clean-up
 rm(datInput.raw, data_grain_check, data_grain_check_merge); gc()
 
 
 
 
-# ------- 5. Feature engineering for modelling purposes (SLC input space)
-# - Confirm if the main dataset is loaded into memory
+# ------- 5. Feature engineering for modelling purposes
+# --- 5.1 Confirm if the main dataset is loaded into memory
 if (!exists('datCredit_smp')) unpack.ffdf(paste0(genPath,"creditdata_final_smp_a"), tempPath)
 
-# --- Missing value diagnostics & treatments
-# - Missing value indicators for the input space variables
-# NOTE: There are a lot of missing values for these variables because of system changes etc.
-datCredit_smp[, value_ind_slc_past_due_amt := ifelse(is.na(slc_past_due_amt) | slc_past_due_amt == "", 0, 1)]
-datCredit_smp[, value_ind_slc_days_excess := ifelse(is.na(slc_days_excess) | slc_days_excess == "", 0, 1)]
-datCredit_smp[, value_ind_slc_acct_pre_lim_perc := ifelse(is.na(slc_acct_pre_lim_perc) | slc_acct_pre_lim_perc == "", 0, 1)]
-datCredit_smp[, value_ind_slc_acct_prepaid_perc_dir_12 := ifelse(is.na(slc_acct_prepaid_perc_dir_12) | slc_acct_prepaid_perc_dir_12 == "", 0, 1)]
 
-# - Check the missingness of the variables
-# If they are more than 50% missing - remove
-table(datCredit_smp$value_ind_slc_past_due_amt) %>% prop.table()             # missingness: 11.58% - keep the variable (numeric)
-table(datCredit_smp$value_ind_slc_days_excess) %>% prop.table()              # missingness: 74.37% - discard the variable
-table(datCredit_smp$value_ind_slc_acct_pre_lim_perc) %>% prop.table()        # missingness: 11.58 - keep the variable (numeric)
-table(datCredit_smp$value_ind_slc_acct_prepaid_perc_dir_12) %>% prop.table() # missingness: 11.68% - keep the variable (numeric)
+# --- 5.2 Computing basic statistics of each variable
+# - Categorical variables
+varList_Cat <- c("DefaultStatus1", "DefaultStatus1_lead_12", "DefaultStatus1_lead_12_max",
+                 "g0_Delinq_Shift", "PerfSpellResol_Type_Hist",
+                 "Event_Type","WOff_Ind", "EarlySettle_Ind", "FurtherLoan_Ind", "Redraw_Ind", "LN_TPE", "Repaid_Ind",
+                 "slc_pmnt_method", "slc_acct_arr_dir_3")
+varInfo_Cat <- describe(subset(datCredit_smp, select = varList_Cat))
+
+# - Numeric variables
+varList_Num <- c("g0_Delinq", "g0_Delinq_Num", "g0_Delinq_SD", "g0_Delinq_SD_4", "g0_Delinq_SD_5", "g0_Delinq_SD_6", "g0_Delinq_SD_9", "g0_Delinq_SD_12",
+                 "Age_Adj", "PerfSpell_Num", "Term", "InterestRate_Nom", "InterestRate_Margin", "Principal", "Instalment", "Arrears",
+                 "Balance", "TimeInPerfSpell", "PerfSpell_TimeEnd", "PerfSpell_Age", "PerfSpell_Counter",
+                 "Redrawn_Amt", "BalanceToTerm", "AgeToTerm",
+                 "slc_past_due_amt", "slc_acct_pre_lim_perc", "slc_acct_prepaid_perc_dir_12", "slc_acct_roll_ever_24")
+varInfo_Num <- describe(subset(datCredit_smp, select = varList_Num))
+
+# - [SANITY CHECK] - Check for ovelaps between the categorical and numeric variables
+check.fuse3 <- intersect(varList_Cat,varList_Num)
+cat(if(identical(check.fuse3, character(0))) {'SAFE: No overlapping fields in the categorical and numerical variables'} else {
+  'WARNING: Overlapping field(s) detected in the input space and the main credit dataset.'})
+
+
+# --- 5.3 Missing value diagnostics & treatments
+# - Diagnostics of missing values in the additional engineered "SLC" input space | If missingness > 50% missing remove variable
+# Categorical variables
+table(is.na(datCredit_smp$slc_pmnt_method)) %>% prop.table()              # missingness: 11.58% - keep variable
+table(is.na(datCredit_smp$slc_acct_arr_dir_3)) %>% prop.table()           # missingness: 11.58% - keep variable
+# Numerical variables
+table(is.na(datCredit_smp$slc_past_due_amt)) %>% prop.table()             # missingness: 11.58% - keep variable
+table(is.na(datCredit_smp$slc_days_excess)) %>% prop.table()              # missingness: 74.37% - discard variable
+table(is.na(datCredit_smp$slc_acct_pre_lim_perc)) %>% prop.table()        # missingness: 11.58 - keep variable
+table(is.na(datCredit_smp$slc_acct_prepaid_perc_dir_12)) %>% prop.table() # missingness: 11.68% - keep variable
+
+# - Categorical variables
+# [slc_pmnt_method] - Missing value indicators
+varInfo_Cat$slc_pmnt_method
+### RESULTS: [slc_pmnt_method] has 7 levels and 506737 observations have missing values. Bin the missing values with the already existent "unknown" bin.
+# [TREATMENT] Binning "Unknown" values and missing values into one level
+datCredit_smp[, slc_pmnt_method := 
+                ifelse(is.na(slc_pmnt_method) | slc_pmnt_method == "" | slc_pmnt_method == "Unknown",
+                       "MISSING_DATA", slc_pmnt_method)]
+(varInfo_Cat$slc_pmnt_method <- describe(datCredit_smp$slc_pmnt_method))
+### RESULTS: [slc_pmnt_method] has 7 levels and 0 observations have missing values.
+# [TREATMENT] Apply factor transformation
+datCredit_smp[,slc_pmnt_method:=factor(slc_pmnt_method)]
+### RESULTS: Missing values imputed and facorisation applied to the levels of the variable.
+
+# [slc_acct_arr_dir_3] - Missing value indicators
+varInfo_Cat$slc_acct_arr_dir_3
+### RESULTS: [slc_acct_arr_dir_3] has 4 levels and xx observations have missing values.
+### [TREATMENT] Binning "N/A" values and missing values into one level
+datCredit_smp[, slc_acct_arr_dir_3 := 
+                ifelse(is.na(slc_acct_arr_dir_3) | slc_acct_arr_dir_3 == "" | slc_acct_arr_dir_3 == "N/A",
+                       "MISSING_DATA", slc_acct_arr_dir_3)]
+(varInfo_Cat$slc_acct_arr_dir_3 <- describe(datCredit_smp$slc_acct_arr_dir_3))
+### RESULTS: [slc_acct_arr_dir_3] has 4 levels and 506737 missing values. Bin the missing values with the already existent "N/A" bin.
+# [TREATMENT] Apply factor transformation
+datCredit_smp[,slc_acct_arr_dir_3:=factor(slc_acct_arr_dir_3)]
+### RESULTS: Missing values imputed and facorisation applied to the levels of the variable.
+
+# - Numerical variables
+# [slc_past_due_amt] - Missing value indicators
+datCredit_smp[, value_ind_slc_past_due_amt := ifelse(is.na(slc_past_due_amt) | slc_past_due_amt == "", 0, 1)]
+(varInfo_Cat$value_ind_slc_past_due_amt <- describe(datCredit_smp$value_ind_slc_past_due_amt))
+### RESULTS: No missing values, variable created successfully.
+
+# [slc_past_due_amt] - Missing value imputation
+varInfo_Num$slc_past_due_amt
+### RESULTS:    [slc_past_due_amt] has scale [0;2545590] and 506737 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 2718; note a VERY large single outlier in the right hand-side tail
+### CONCLUSION: Median imputation proceeds from the distribution of values which constitutes performance spells only (all associated values from default spells are excluded)
+# [TREATMENT] Median imputation for missing values (due to non-normality, i.e. high skewness)
+datCredit_smp[, slc_past_due_amt_imputed_med := 
+                ifelse(is.na(slc_past_due_amt) | slc_past_due_amt == "", 
+                       median(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_past_due_amt) | slc_past_due_amt == ""), slc_past_due_amt], na.rm=TRUE), slc_past_due_amt)]
+(varInfo_Num$slc_past_due_amt_imputed_med <- describe(datCredit_smp$slc_past_due_amt_imputed_med))
+### RESULTS: [slc_past_due_amt_imputed_med] has scale [0;2545589.79] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 2403
+hist(datCredit_smp$slc_past_due_amt_imputed_med, breaks=500); skewness(datCredit_smp$slc_past_due_amt_imputed, na.rm = T); datCredit_smp[slc_past_due_amt_imputed_med==0,.N]/datCredit_smp[,.N]
+### RESULTS:    [slc_past_due_amt_imputed_med] is skewed to the right; Skewness = 27.67188; 91.32243% of variables have zero values.
+### CONCLUISON: Use winsorisation on the upper 0.1% quantile to remove influence of outliers.
+# [TREATMENT] Apply Winsorisation
+(wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_past_due_amt) | slc_past_due_amt == ""), slc_past_due_amt], probs = 0.999))
+datCredit_smp[, slc_past_due_amt_imputed_med_wins := ifelse(slc_past_due_amt_imputed_med < wins_quant, slc_past_due_amt_imputed_med, wins_quant)]
+(varInfo_Num$slc_past_due_amt_imputed_med_wins <- describe(datCredit_smp$slc_past_due_amt_imputed_med_wins))
+### RESULTS: [slc_past_due_amt_imputed_wins] has scale [0;32027.06] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 1012
+### SUMMARY: Median imputation used to treat missing values.
+###          Winsorisation applied to 99.9% quantile (value = 32027.06)
+###          No further treatment necessary.
+
+# [slc_acct_pre_lim_perc] - Missing value indicator
+datCredit_smp[, value_ind_slc_acct_pre_lim_perc := ifelse(is.na(slc_acct_pre_lim_perc) | slc_acct_pre_lim_perc == "", 0, 1)]
+(varInfo_Cat$value_ind_slc_acct_pre_lim_perc <- describe(datCredit_smp$value_ind_slc_acct_pre_lim_perc))
+### RESTULS: Binning successful, no missing values in [value_ind_slc_acct_pre_lim_perc]
+
+# [slc_acct_pre_lim_perc] - Missing value imputation
+varInfo_Num$slc_acct_pre_lim_perc
+### RESULTS:    [slc_acct_pre_lim_perc] has scale [0;1] and 506737 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.09247
+### CONCLUSION: Median imputation proceeds from the distribution of values which constitutes performance spells only (all associated values from default spells are excluded)
+# [TREATMENT] Median imputation for missing values (due to non-normality, i.e. high skewness)
+datCredit_smp[, slc_acct_pre_lim_perc_imputed_med := 
+                ifelse(is.na(slc_acct_pre_lim_perc) | slc_acct_pre_lim_perc == "", 
+                       median(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_acct_pre_lim_perc) | slc_acct_pre_lim_perc == ""), slc_acct_pre_lim_perc], na.rm=TRUE), slc_acct_pre_lim_perc)]
+(varInfo_Num$slc_acct_pre_lim_perc_imputed_med <- describe(datCredit_smp$slc_acct_pre_lim_perc_imputed_med))
+### RESTULS: [slc_acct_pre_lim_perc_imputed_med] has scale [0;0.711808] and 0 observations have missing values; with 0 at 50% quantile and 0 .005343at 75% quantile and mean of 0.08176.
+hist(datCredit_smp$slc_acct_pre_lim_perc_imputed_med, breaks=500); skewness(datCredit_smp$slc_acct_pre_lim_perc_imputed_med, na.rm = T); datCredit_smp[slc_acct_pre_lim_perc_imputed_med==0,.N]/datCredit_smp[,.N]
+### RESULTS: Distribution is skewed to the right; Skewness = 3.099905; 69.4518% of variables have zero values.
+### SUMMARY: Median imputation used to treat missing values.
+###          No outliers present, the variable has a reasonable scale and hence no scaling is applied.
+###          [slc_acct_pre_lim_perc_imputed] has scale [0;1] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.07596
+###          No further treatment necessary
+
+# [slc_acct_prepaid_perc_dir_12] - Missing value indicator
+datCredit_smp[, value_ind_slc_acct_prepaid_perc_dir_12 := ifelse(is.na(slc_acct_prepaid_perc_dir_12) | slc_acct_prepaid_perc_dir_12 == "", 0, 1)]
+(varInfo_Cat$value_ind_slc_acct_prepaid_perc_dir_12 <- describe(datCredit_smp$value_ind_slc_acct_prepaid_perc_dir_12))
+### RESTULS: Binning successful, no missing values in [value_ind_slc_acct_prepaid_perc_dir_12]
+
+# [slc_acct_prepaid_perc_dir_12] - Missing value imputation
+varSLC_Info_Num$slc_acct_prepaid_perc_dir_12
+### RESULTS:    [slc_acct_prepaid_perc_dir_12] has scale [0;3609540717775.48] and 506737 observations have missing values; with 0 at 50% quantile and 0.07214 at 75% quantile and mean of 1216054
+### CONCLUSION: Median imputation proceeds from the distribution of values which constitutes performace spells only (all associated values from default spells are excluded)
+# [TREATMENT] Median imputation for missing values
+datCredit_smp[, slc_acct_prepaid_perc_dir_12_imputed_med := 
+                ifelse(is.na(slc_acct_prepaid_perc_dir_12) | slc_acct_prepaid_perc_dir_12 == "", 
+                       median(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_acct_prepaid_perc_dir_12) | slc_acct_prepaid_perc_dir_12 == ""), slc_acct_prepaid_perc_dir_12], na.rm=TRUE), slc_acct_prepaid_perc_dir_12)]
+(varInfo_Num$slc_acct_prepaid_perc_dir_12_imputed_med <- describe(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_med))
+### RESULTS: [slc_acct_prepaid_perc_dir_12_imputed] has scale [0;3609540717775.48] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 1075259
+hist(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_med, breaks=500); skewness(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_med, na.rm = T); datCredit_smp[slc_acct_prepaid_perc_dir_12_imputed_med==0,.N]/datCredit_smp[,.N]
+### RESULTS:    Distribution is skewed to the right; Skewness = 2066.594; 76.1361% of variables have zero values.
+### CONCLUSION: Apply Winsorisation to the upper 1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values) - Winsorisation only applied to observations in default spell
+###             NApply Winsorisation to the top 1%, this is since the scale is still very large when applying Winsorisation to the top 0.01%
+# [TREATMENT] Apply Winsorisation
+(wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_acct_prepaid_perc_dir_12) | slc_acct_prepaid_perc_dir_12 == ""), slc_acct_prepaid_perc_dir_12], probs = 0.99))
+datCredit_smp[, slc_acct_prepaid_perc_dir_12_imputed_med_wins := ifelse(slc_acct_prepaid_perc_dir_12_imputed_med < wins_quant, slc_acct_prepaid_perc_dir_12_imputed_med, wins_quant)]
+(varInfo_Num$slc_acct_prepaid_perc_dir_12_imputed_wins <- describe(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_med_wins))
+### RESULTS: [slc_acct_prepaid_perc_dir_12_imputed_wins] has scale [0;87.56] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 1.455.
+hist(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_med_wins, breaks=500); skewness(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_med_wins, na.rm = T); datCredit_smp[slc_acct_prepaid_perc_dir_12_imputed_med_wins==0,.N]/datCredit_smp[,.N]
+### RESULTS: [slc_acct_prepaid_perc_dir_12_imputed_med_wins] is skewed to the right; Skewness = 8.708705; 76.1361% of variables have zero values.
+### SUMMARY: Median imputation used to treat missing values.
+###          Winsorisation applied to the 99% quantile (value = 87.556633).
+###          No further treatment necessary.
+
+# [slc_acct_roll_ever_24] - Missing value indicator
+datCredit_smp[, value_ind_slc_acct_roll_ever_24 := ifelse(is.na(slc_acct_roll_ever_24) | slc_acct_roll_ever_24 == "", 0, 1)]
+(varInfo_Cat$value_ind_slc_acct_roll_ever_24 <- describe(datCredit_smp$value_ind_slc_acct_roll_ever_24))
+### RESTULS: Binning successful, no missing values in [value_ind_slc_acct_roll_ever_24]
+
+# [slc_acct_roll_ever_24] - Missing value imputation
+varInfo_Num$slc_acct_roll_ever_24
+### RESULTS:    [slc_acct_roll_ever_24] has scale [0;4] and 507101 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.4893
+### CONCLUSION: Median imputation proceeds from the distribution of values which constitutes performance spells only (all associated values from default spells are excluded)
+# [TREATMENT] Median imputation for missing values
+datCredit_smp[, slc_acct_roll_ever_24_imputed_med := 
+                ifelse(is.na(slc_acct_roll_ever_24) | slc_acct_roll_ever_24 == "" | slc_acct_roll_ever_24 == "Unknown", 
+                       median(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_acct_roll_ever_24) | slc_acct_roll_ever_24 == "") ,slc_acct_roll_ever_24], na.rm=TRUE), slc_acct_roll_ever_24)]
+(varInfo_Cat$slc_acct_roll_ever_24_imputed_med <- describe(datCredit_smp$slc_acct_roll_ever_24_imputed_med))
+### RESULTS: [slc_acct_roll_ever_24_imputed_med] has scale [0;3609540717775.48] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.4326
+hist(datCredit_smp[,slc_acct_roll_ever_24_imputed_med], breaks=500); skewness(datCredit_smp$slc_acct_roll_ever_24_imputed_med, na.rm = T); datCredit_smp[slc_acct_roll_ever_24_imputed_med==0,.N]/datCredit_smp[,.N]
+### RESULTS: Distribution is skewed to the right; Skewness = 2.501518; 82.32882% of variables have zero values.
+### SUMMARY: Median imputation used to treat missing values.
+###          No outliers present, since the variable represents counts and only has 4 levels.
+###          No further treatment necessary
+
+# - [InterestRate_Margin] (incorporating risk-based pricing info)
+varInfo_Num$InterestRate_Margin; hist(datCredit_smp$InterestRate_Margin, breaks="FD")
+datCredit_smp[is.na(InterestRate_Margin), .N] / datCredit_smp[,.N] * 100
+### RESULTS:    Highly right-skewed distribution (as expected), with mean of -0.007 vs median of -0.008, 
+###             bounded by [-0.02, 0.01] for 5%-95% percentiles; some negative outliers distort shape of distribution
+### CONCLUSION: Use median imputation, given 0.53% missingness degree
+datCredit_smp[, InterestRate_Margin_imputed_mean := 
+                ifelse(is.na(InterestRate_Margin) | InterestRate_Margin == "", 
+                       median(InterestRate_Margin, na.rm=TRUE), InterestRate_Margin)]
+# [SANITY CHECK] Confirm treatment success
+cat( ( datCredit_smp[is.na(InterestRate_Margin_imputed_mean), .N] == 0) %?% 
+       'SAFE: Treatment successful for [InterestRate_Margin_imputed_mean].\n' %:% 
+       'ERROR: Treatment failed for [InterestRate_Margin_imputed_mean] \n' )
+(varInfo_Num$InterestRate_Margin_imputed_mean <- describe(datCredit_smp$InterestRate_Margin_imputed_mean)); hist(datCredit_smp$InterestRate_Margin_imputed_mean, breaks="FD")
+### RESULTS: Highly right-skewed distribution (as expected), with mean of -0.007 vs median of -0.008, bounded by [-0.02, 0.01] for 5%-95% percentiles.
 
 # - Remove the variables that have missingness > 50%
 suppressWarnings( datCredit_smp[, `:=`(value_ind_slc_days_excess = NULL, slc_days_excess = NULL, 
@@ -336,567 +493,151 @@ suppressWarnings( datCredit_smp[, `:=`(value_ind_slc_days_excess = NULL, slc_day
                                         value_ind_ccm_worst_arrears_24m = NULL, ccm_worst_arrears_24m = NULL)]); gc()
 
 
-# --- Computing basic statistics of each variable
-# - Categorical variables
-varList_SLC_Cat <- c('slc_pmnt_method','slc_acct_arr_dir_3')
-varSLC_Info_Cat <- describe(subset(datCredit_smp, select = varList_SLC_Cat))
-
-# - Numeric variables
-varList_SLC_Num <- c('slc_past_due_amt','slc_acct_pre_lim_perc','slc_acct_prepaid_perc_dir_12','slc_acct_roll_ever_24')
-varSLC_Info_Num <- describe(subset(datCredit_smp, select = varList_SLC_Num))
-
-# - [SANITY CHECK] - Check for ovelaps between the categorical and numeric variables
-check.fuse3 <- intersect(varList_SLC_Cat,varList_SLC_Num)
-cat(if(identical(check.fuse3, character(0))) {'SAFE: No overlapping fields in the categorical and numerical variables'} else {
-                                             'WARNING: Overlapping field(s) detected in the input space and the main credit dataset.'})
-
-# --- Analysis and Treatments of Categorical variables
-# - [slc_pmnt_method] - Payment method
-varSLC_Info_Cat$slc_pmnt_method # [slc_pmnt_method] has 7 levels and 506737 observations have missing values.
-# [TREATMENT] Binning "Unknown" values and missing values into one level
-datCredit_smp[, slc_pmnt_method := 
-                 ifelse(is.na(slc_pmnt_method) | slc_pmnt_method == "" | slc_pmnt_method == "Unknown",
-                        "MISSING_DATA", slc_pmnt_method)]
-(varSLC_Info_Cat$slc_pmnt_method <- describe(datCredit_smp$slc_pmnt_method)) # [slc_pmnt_method] has 7 levels and 0 observations have missing values.
-# [TREATMENT] Apply factor transformation
-datCredit_smp[,slc_pmnt_method:=factor(slc_pmnt_method)]
-### RESULTS: ~ Missing values imputed and facorisation applied to the levels of the variable.
-###            No further treatment necessary
-
-# - [slc_acct_arr_dir_3] - Account-level arrears direction vs three months ago
-varSLC_Info_Cat$slc_acct_arr_dir_3 # [slc_acct_arr_dir_3] has 4 levels and 506737 observations have missing values.
-# [TREATMENT] Binning "N/A" values and missing values into one level
-datCredit_smp[, slc_acct_arr_dir_3 := 
-                 ifelse(is.na(slc_acct_arr_dir_3) | slc_acct_arr_dir_3 == "" | slc_acct_arr_dir_3 == "N/A", 
-                        "MISSING_DATA", slc_acct_arr_dir_3)]
-(varSLC_Info_Cat$slc_acct_arr_dir_3 <- describe(datCredit_smp$slc_acct_arr_dir_3)) # [slc_acct_arr_dir_3] has 4 levels and 0 observations have missing values.
-# [TREATMENT] Apply factor transformation
-datCredit_smp[,slc_acct_arr_dir_3:=factor(slc_acct_arr_dir_3)]
-### RESULTS: ~ Missing values imputed and facorisation applied to the levels of the variable.
-###            No further treatment necessary
 
 
+# --- 6. Feature Engineering: Binning and factorisation
+# - Condense the payment group
+datCredit_smp[, pmnt_method_grp := 
+                case_when(slc_pmnt_method == "Debit Order FNB account" | slc_pmnt_method == "Debit Order other bank" ~ "Debit Order",
+                          slc_pmnt_method == "Salary" | slc_pmnt_method == "Suspense" ~ "Salary/Suspense",
+                          TRUE ~ slc_pmnt_method)]
+# [SANITY CHECK] Check new feature for illogical values
+cat( ( datCredit_smp[is.na(pmnt_method_grp), .N] == 0) %?% 
+       'SAFE: New feature [pmnt_method_grp] has logical values.\n' %:% 
+       'WARNING: New feature [pmnt_method_grp] has illogical values \n' )
+(varInfo_Cat$pmnt_method_grp <- describe(datCredit_smp$pmnt_method_grp))
+### RESULTS: Bins grouped logically such that each bin now has sufficient observations
 
-# --- Analysis and Treatments of Numeric variables
-# - [slc_past_due_amt]
-varSLC_Info_Num$slc_past_due_amt # [slc_past_due_amt] has scale [0;2545589.79] and 506737 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 2718; note a VERY large single outlier in the right hand-side tail
-# [TREATMENT] Median imputation for missing values (due to non-normality, i.e. high skewness) - Median imputation proceeds from the distribution of values which constitutes performace spells only (all associated values from default spells are excluded)
-datCredit_smp[, slc_past_due_amt_imputed := 
-                 ifelse(is.na(slc_past_due_amt) | slc_past_due_amt == "", 
-                        median(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_past_due_amt) | slc_past_due_amt == ""), slc_past_due_amt], na.rm=TRUE), slc_past_due_amt)]
-(varSLC_Info_Num$slc_past_due_amt_imputed <- describe(datCredit_smp$slc_past_due_amt_imputed)) # [slc_past_due_amt_imputed] has scale [0;2545589.79] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 2403
-hist(datCredit_smp$slc_past_due_amt_imputed, breaks=500); skewness(datCredit_smp$slc_past_due_amt_imputed, na.rm = T); datCredit_smp[slc_past_due_amt_imputed==0,.N]/datCredit_smp[,.N] # [slc_past_due_amt_imputed] is skewed to the right; Skewness = 27.67188; 91.32243% of variables have zero values.
-# [TREATMENT] Apply Winsorisation to the upper 0.1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values) - Winsorisation only applied to observation in default spell
-wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_past_due_amt) | slc_past_due_amt == ""), slc_past_due_amt], probs = 0.999)
-datCredit_smp[, slc_past_due_amt_imputed_wins := ifelse(slc_past_due_amt_imputed < wins_quant, slc_past_due_amt_imputed, wins_quant)]
-(varSLC_Info_Num$slc_past_due_amt_imputed_wins <- describe(datCredit_smp$slc_past_due_amt_imputed_wins)) # [slc_past_due_amt_imputed_wins] has scale [0;32027.06] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 1012
-hist(datCredit_smp$slc_past_due_amt_imputed_wins, breaks=500); skewness(datCredit_smp$slc_past_due_amt_imputed_wins, na.rm = T); datCredit_smp[slc_past_due_amt_imputed_wins==0,.N]/datCredit_smp[,.N] # [slc_past_due_amt_imputed_wins] is skewed to the right; Skewness = 5.521292; 91.32243% of variables have zero values.
-# [TREATMENT] Scale the data using min-max scaling (with no shifting due to high prevalence of zero-values)
-datCredit_smp[, slc_past_due_amt_imputed_wins_mm_scaled := scaler(slc_past_due_amt_imputed_wins,shift = F)]
-(varSLC_Info_Num$slc_past_due_amt_imputed_wins_mm_scaled <- describe(datCredit_smp$slc_past_due_amt_imputed_wins_mm_scaled)) 
-hist(datCredit_smp$slc_past_due_amt_imputed_wins_mm_scaled, breaks=500)
-### RESULTS: ~ Median imputation used to treat missing values.
-###            Imputed variable was scaled using min-max scaling with no shifting.
-###            [slc_past_due_amt_imputed_wins_mm_scaled] has scale [0;1] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.03161
-###            No further treatment necessary
-
-
-# - [slc_acct_pre_lim_perc] - Prepaid/available funds to limit
-varSLC_Info_Num$slc_acct_pre_lim_perc # [slc_acct_pre_lim_perc] has scale [0;1] and 506737 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.09307
-# [TREATMENT] Median imputation for missing values (due to non-normality, i.e. high skewness) - Median imputation proceeds from the distribution of values which constitutes performace spells only (all associated values from default spells are excluded)
-datCredit_smp[, slc_acct_pre_lim_perc_imputed := 
-                 ifelse(is.na(slc_acct_pre_lim_perc) | slc_acct_pre_lim_perc == "", 
-                        median(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_acct_pre_lim_perc) | slc_acct_pre_lim_perc == ""), slc_acct_pre_lim_perc], na.rm=TRUE), slc_acct_pre_lim_perc)]
-(varSLC_Info_Num$slc_acct_pre_lim_perc_imputed <- describe(datCredit_smp$slc_acct_pre_lim_perc_imputed))
-hist(datCredit_smp$slc_acct_pre_lim_perc_imputed, breaks=500); skewness(datCredit_smp$slc_acct_pre_lim_perc_imputed, na.rm = T); datCredit_smp[slc_acct_pre_lim_perc_imputed==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 3.099905; 69.4518% of variables have zero values.
-### RESULTS: ~ Median imputation used to treat missing values.
-###            No outliers present, the variable has a reasonable scale and hence no scaling is applied.
-###            [slc_acct_pre_lim_perc_imputed] has scale [0;1] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.07596
-###            No further treatment necessary
-
-# - [slc_acct_roll_ever_24]
-varSLC_Info_Num$slc_acct_roll_ever_24 # [slc_acct_roll_ever_24] has scale [0;4] and 507101 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.4893
-# [TREATMENT] Median imputation for missing values -  Median imputation proceeds from the distribution of values which constitutes performace spells only (all associated values from default spells are excluded)
-datCredit_smp[, slc_acct_roll_ever_24_imputed := 
-                 ifelse(is.na(slc_acct_roll_ever_24) | slc_acct_roll_ever_24 == "" | slc_acct_roll_ever_24 == "Unknown", 
-                        median(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_acct_roll_ever_24) | slc_acct_roll_ever_24 == "") ,slc_acct_roll_ever_24], na.rm=TRUE), slc_acct_roll_ever_24)]
-(varSLC_Info_Cat$slc_acct_roll_ever_24_imputed <- describe(datCredit_smp$slc_acct_roll_ever_24_imputed))
-hist(datCredit_smp[,slc_acct_roll_ever_24_imputed], breaks=500); skewness(datCredit_smp$slc_acct_roll_ever_24_imputed, na.rm = T); datCredit_smp[slc_acct_roll_ever_24_imputed==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 2.501518; 82.32882% of variables have zero values.
-### RESULTS: ~ Median imputation used to treat missing values.
-###            No outliers present, since the variable represents counts and only has 4 levels.
-###            For the same reason there, no scaling is applied.
-###            [slc_acct_roll_ever_24] has scale [0;4] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.4326
-###            No further treatment necessary
-
-# - [slc_acct_prepaid_perc_dir_12] The prepaid/available funds of an account compared to 12 months ago (as a %)
-varSLC_Info_Num$slc_acct_prepaid_perc_dir_12 # [slc_acct_pre_lim_perc] has scale [0;3609540717775.48] and 506737 observations have missing values; with 0 at 50% quantile and 0.07214 at 75% quantile and mean of 1216054
-# [TREATMENT] Median imputation for missing values - Median imputation proceeds from the distribution of values which constitutes performace spells only (all associated values from default spells are excluded)
-datCredit_smp[, slc_acct_prepaid_perc_dir_12_imputed := 
-                 ifelse(is.na(slc_acct_prepaid_perc_dir_12) | slc_acct_prepaid_perc_dir_12 == "", 
-                        median(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_acct_prepaid_perc_dir_12) | slc_acct_prepaid_perc_dir_12 == ""), slc_acct_prepaid_perc_dir_12], na.rm=TRUE), slc_acct_prepaid_perc_dir_12)]
-(varSLC_Info_Num$slc_acct_prepaid_perc_dir_12_imputed <- describe(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed)) # [slc_acct_prepaid_perc_dir_12_imputed] has scale [0;3609540717775.48] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 1075259
-hist(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed, breaks=500); skewness(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed, na.rm = T); datCredit_smp[slc_acct_prepaid_perc_dir_12_imputed==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 2066.594; 76.1361% of variables have zero values.
-# [TREATMENT] Apply Winsorisation to the upper 1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values) - Winsorisation only applied to observations in default spell
-wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(slc_acct_prepaid_perc_dir_12) | slc_acct_prepaid_perc_dir_12 == ""), slc_acct_prepaid_perc_dir_12], probs = 0.99)
-datCredit_smp[, slc_acct_prepaid_perc_dir_12_imputed_wins := ifelse(slc_acct_prepaid_perc_dir_12_imputed < wins_quant, slc_acct_prepaid_perc_dir_12_imputed, wins_quant)] # Note that this is applied to the top 1%, this is since the scale is still very large when applying Winsorisation to the top 0.01%/
-(varSLC_Info_Num$slc_acct_prepaid_perc_dir_12_imputed_wins <- describe(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_wins)) # [slc_acct_prepaid_perc_dir_12_imputed_wins] has scale [0;87.56] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 1.455
-hist(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_wins, breaks=500); skewness(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_wins, na.rm = T); datCredit_smp[slc_acct_prepaid_perc_dir_12_imputed_wins==0,.N]/datCredit_smp[,.N] # [slc_acct_prepaid_perc_dir_12_imputed_wins] is skewed to the right; Skewness = 8.708705; 76.1361% of variables have zero values.
-# [TREATMENT] Scale the data using min-max scaling (with no shifting due to high prevalence of zero-values)
-datCredit_smp[, slc_acct_prepaid_perc_dir_12_imputed_wins_mm_scaled := scaler(slc_acct_prepaid_perc_dir_12_imputed_wins,shift = F)]
-(varSLC_Info_Num$slc_acct_prepaid_perc_dir_12_imputed_wins_mm_scaled <- describe(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_wins_mm_scaled)) 
-hist(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_wins_mm_scaled, breaks=500)
-### RESULTS: ~ Median imputation used to treat missing values.
-###            Imputed variable was scaled using min-max scaling with no shifting.
-###            [slc_acct_prepaid_perc_dir_12_imputed_wins_mm_scaled] has scale [~0;1] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.01662.
-###            No further treatment necessary
-
-# - Saving description objects on the disk for fast disk-based retrieval
-pack.ffdf(paste0(genObjPath,"SLC_Var_Cat_Descript"), varSLC_Info_Cat)
-pack.ffdf(paste0(genObjPath,"SLC_Var_Num_Descript"), varSLC_Info_Num)
-
-# - Clean-up
-rm(varList_SLC_Cat, varSLC_Info_Cat, varList_SLC_Num, varSLC_Info_Num); gc()
-
-
-
-
-# ------- 6. Feature engineering for modelling purposes (Credit data input space)
-# --- Computing basic statistics of each variable
-# - Categorical variables
-varList_Credit_Cat <- c('g0_Delinq','DefaultStatus1', 'DefaultStatus1_lead_12', 'DefaultStatus1_lead_12_max',
-                        'PerfSpell_LeftTrunc', 'PerfSpellResol_Type_Hist','HasLeftTruncPerfSpell',
-                        'DefSpell_LeftTrunc', 'DefSpellResol_Type_Hist','HasLeftTruncDefSpell',
-                        'Event_Type','WOff_Ind',
-                        'EarlySettle_Ind','FurtherLoan_Ind','Redraw_Ind','LN_TPE','Repaid_Ind',
-                        'g0_Delinq_Shift', 'PerfSpell_g0_Delinq_Shift', 'DefSpell_g0_Delinq_Shift')
-varCredit_Info_Cat <- describe(subset(datCredit_smp, select = varList_Credit_Cat))
-
-# - Numeric variables
-varList_Credit_Num <- c('Age_Adj', 'PerfSpell_Num','Term','InterestRate_Nom','InterestRate_Margin','Principal','Instalment','Receipt_Inf','Arrears',
-                        'Balance','TimeInPerfSpell','PerfSpell_TimeEnd','PerfSpell_Age', 'PerfSpell_Counter',
-                        'TimeInDefSpell', 'DefSpellResol_TimeEnd', 'DefSpell_Age', 'DefSpell_Counter',
-                        'Event_Time','FurtherLoan_Amt','Redrawn_Amt', 'BalanceToTerm', 'AgeToTerm',
-                        'g0_Delinq_Num', 'PerfSpell_g0_Delinq_Num', 'DefSpell_g0_Delinq_Num',
-                        'g0_Delinq_SD', 'PerfSpell_g0_Delinq_SD', 'DefSpell_g0_Delinq_SD')
-
-# - [SANITY CHECK] - Check for ovelaps between the categorical and numeric variables
-check.fuse4 <- intersect(varList_Credit_Cat,varList_Credit_Num) # No overlapping variables.
-cat(if(identical(check.fuse4, character(0))) {'SAFE: No overlapping fields in the categorical and numerical variables'} else {
-  'WARNING: Overlapping field(s) detected in the input space and the main credit dataset.'})
-
-# --- Analysis and Treatments of Categorical variables
-# - [g0_Delinq]
-varCredit_Info_Cat$g0_Delinq # [g0_Delinq] has 4 levels and no missing values. 89.7% of observations have no delinquency and 4% of observations have delinquency status of 3.
-datCredit_smp$g0_Delinq %>% table() %>% prop.table()
-barplot(table(datCredit_smp$g0_Delinq)) # Most accounts have delinquency status of zero.
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [DefaultStatus1]
-varCredit_Info_Cat$DefaultStatus1 # [DefaultStatus1] has 2 levels and no missing values. 94.74% of observations in default
-datCredit_smp$DefaultStatus1 %>% table() %>% prop.table()
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [DefaultStatus1_lead_12]
-varCredit_Info_Cat$DefaultStatus1_lead_12 # [DefaultStatus1_lead_12] has 2 levels and 52673 missing values. 93.27% of observations is in default 12-months from their reporting date
-datCredit_smp$DefaultStatus1_lead_12 %>% table() %>% prop.table()
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [DefaultStatus1_lead_12_max]
-varCredit_Info_Cat$DefaultStatus1_lead_12_max # [DefaultStatus1_lead_12_max] has 2 levels and 52673 missing values. 91.80% of observations in default in the next the 12-months from their reporting date
-datCredit_smp$DefaultStatus1_lead_12_max %>% table() %>% prop.table()
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [g0_Delinq_Shift]
-varCredit_Info_Cat$g0_Delinq_Shift # [g0_Delinq_Shift] has 2 levels and 52673 missing values. 91.80% of observations in default in the next the 12-months from their reporting date
-datCredit_smp$g0_Delinq_Shift %>% table() %>% prop.table()
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [PerfSpell_g0_Delinq_Shift]
-varCredit_Info_Cat$PerfSpell_g0_Delinq_Shift # [PerfSpell_g0_Delinq_Shift] has 2 levels and 52673 missing values. 91.80% of observations in default in the next the 12-months from their reporting date
-datCredit_smp$PerfSpell_g0_Delinq_Shift %>% table() %>% prop.table()
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [DefSpell_g0_Delinq_Shift]
-varCredit_Info_Cat$DefSpell_g0_Delinq_Shift # [DefSpell_g0_Delinq_Shift] has 2 levels and 52673 missing values. 91.80% of observations in default in the next the 12-months from their reporting date
-datCredit_smp$PerfSpell_g0_Delinq_Shift %>% table() %>% prop.table()
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [PerfSpell_LeftTrunc] - Indicates if the account is left-truncated.
-varCredit_Info_Cat$PerfSpell_LeftTrunc # [PerfSpell_LeftTrunc] has 2 levels and 207334 missing values. 45.14% of performance spells have left-truncations.
-datCredit_smp$PerfSpell_LeftTrunc %>% table() %>% prop.table()
-### RESULTS: ~ No further treatment necessary
-
-# - [HasLeftTruncPerfSpell] - Indicates if the performance spell is left-truncated.
-varCredit_Info_Cat$HasLeftTruncPerfSpell # [HasLeftTruncPerfSpell] has 2 levels and no missing values. 51.76% of performance spells have left-truncations.
-datCredit_smp$HasLeftTruncPerfSpell %>% table() %>% prop.table()
-# [TREATMENT] Apply factor transformation
-datCredit_smp[,HasLeftTruncPerfSpell:=factor(HasLeftTruncPerfSpell)]
-### RESULTS:~ [PerfSpell_LeftTrunc] and [HasLeftTruncPerfSpell] are statistically the same, but they are used at different levels (see script 2c).
-###         ~ No further treatment necessary
-
-# - [PerfSpellResol_Type_Hist] - Categorical variable showing how a performance spell has ended (defaulted, settled, written-off, or anything else (paid-up))
-varCredit_Info_Cat$PerfSpellResol_Type_Hist # [PerfSpellResol_Type_Hist] has 5 levels and no missing values. 12.52% of performance spells defaulted; 41.56% of performance spells have been right-censored.
+# - [PerfSpellResol_Type_Hist]
+varInfo_Cat$PerfSpellResol_Type_Hist
 datCredit_smp$PerfSpellResol_Type_Hist %>% table() %>% prop.table()
 barplot(table(datCredit_smp$PerfSpellResol_Type_Hist))
+### RESULTS [PerfSpellResol_Type_Hist] has 5 levels and no missing values. 12.52% of performance spells defaulted; 41.56% of performance spells have been right-censored.
 # [TREATMENT] Apply factor transformation
 datCredit_smp[,PerfSpellResol_Type_Hist:=factor(PerfSpellResol_Type_Hist)]
-### RESULTS: ~ No further treatment necessary
-
-# - [DefSpell_LeftTrunc] - Indicates if the account is left-truncated.
-varCredit_Info_Cat$DefSpell_LeftTrunc # [DefSpell_LeftTrunc] has 2 levels and 4146416 missing values. 3.89% of default spells have left-truncations.
-datCredit_smp$DefSpell_LeftTrunc %>% table() %>% prop.table()
-### RESULTS: ~ No further treatment necessary
-
-# - [HasLeftTruncDefSpell] - Indicates if the default spell is left-truncated.
-varCredit_Info_Cat$HasLeftTruncDefSpell # [HasLeftTruncPerfSpell] has 2 levels and no missing values. 4.19%% of default spells have left-truncations.
-datCredit_smp$HasLeftTruncDefSpell %>% table() %>% prop.table()
-# [TREATMENT] Apply factor transformation
-datCredit_smp[,HasLeftTruncDefSpell:=factor(HasLeftTruncDefSpell)]
-### RESULTS:~ [DefSpell_LeftTrunc] and [HasLeftTruncDefSpell] seem statistically the same, but they are used at different levels.
-###         ~ No further treatment necessary
-
-# - [DefSpellResol_Type_Hist]
-varCredit_Info_Cat$DefSpellResol_Type_Hist # [DefSpellResol_Type_Hist] has 3 levels and 4146416 missing values. 61.43% of default spells have cured; 59.53% of default spells are written-off
-datCredit_smp$DefSpellResol_Type_Hist %>% table() %>% prop.table()
-barplot(table(datCredit_smp$DefSpellResol_Type_Hist))
-# [TREATMENT] Apply factor transformation
-datCredit_smp[,DefSpellResol_Type_Hist:=factor(DefSpellResol_Type_Hist)]
-### RESULTS: ~ No further treatment necessary
-
-# - [Event_Type]
-varCredit_Info_Cat$Event_Type # [Event_Type] has 4 levels and no missing values. 45% of loan accounts were active (censored); 47.5% were settled; 4.2% were written-off.
-datCredit_smp$Event_Type %>% table() %>% prop.table()
-barplot(table(datCredit_smp$Event_Type))
-# [TREATMENT] Apply factor transformation
-datCredit_smp[,Event_Type:=factor(Event_Type)]
-### RESULTS: ~ No further treatment necessary
-
-# - [WOff_Ind]
-varCredit_Info_Cat$WOff_Ind # [WOff_Ind] has 2 levels and no missing values. 99.94% of observations did not experience write-off.
-datCredit_smp$WOff_Ind %>% table() %>% prop.table()
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [EarlySettle_Ind]
-varCredit_Info_Cat$EarlySettle_Ind # [EarlySettle_Ind] has 2 levels and no missing values. 99.26% of observations did not experience early settlement.
-datCredit_smp$EarlySettle_Ind %>% table() %>% prop.table()
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [FurtherLoan_Ind]
-varCredit_Info_Cat$FurtherLoan_Ind # [FurtherLoan_Ind] has 2 levels and no missing values. 99.88% of observations did not "re-mortgage".
-datCredit_smp$FurtherLoan_Ind %>% table() %>% prop.table()
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [Redraw_Ind]
-varCredit_Info_Cat$Redraw_Ind # [Redraw_Ind] has 3 levels and no missing values. 93.15% of observations are in level 1, 3.95% are in level 2, and 2.90% of observation are in level 3.
-datCredit_smp$Redraw_Ind %>% table() %>% prop.table()
-barplot(table(datCredit_smp$Redraw_Ind))
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
-
-# - [Repaid_Ind]
-varCredit_Info_Cat$Repaid_Ind # [Repaid_Ind] has 2 levels and no missing values. 99.97456% of observations experienced no repayment.
-datCredit_smp$Repaid_Ind %>% table() %>% prop.table()
-### RESULTS: ~ Do not apply transformation due to the special/ important nature of this field.
-###            No further treatment necessary
+### RESULTS: No further treatment necessary
 
 # - [LN_TPE]
-varCredit_Info_Cat$LN_TPE # [LN_TPE] has 2 levels and no missing values. 89.1% of observations are in level 'CHL' and 10.9% are in level 'WHL'
+varInfo_Cat$LN_TPE
 datCredit_smp$LN_TPE %>% table() %>% prop.table()
+### RESULTS: [LN_TPE] has 2 levels and no missing values. 89.1% of observations are in level 'CHL' and 10.9% are in level 'WHL'
 # [TREATMENT] Apply factor transformation
 datCredit_smp[,LN_TPE:=factor(LN_TPE)]
 ### RESULTS: ~ No further treatment necessary
 
+# - Factorised [g0_Delinq] variable
+datCredit_smp[,g0_Delinq_fac := as.factor(g0_Delinq)]
+(varInfo_Cat$g0_Delinq_fac <- describe(datCredit_smp$g0_Delinq_fac))
 
-# - Saving description objects on the disk for fast disk-based retrieval
-pack.ffdf(paste0(genObjPath,"Credit_Var_Cat_Descript"), varCredit_Info_Cat)
-
-
-
-# --- Analysis and Treatments of Numeric variables (i) Delinquency level feature engineering
-# - Indicator for when a shift in the state of g0_Delinq occurs (target event) --- Performance spell level
-datCredit_real[, PerfSpell_g0_Delinq_Shift := ifelse(lag(g0_Delinq, n=1)==g0_Delinq,0,1), by=list(PerfSpell_Key)]
-datCredit_real[is.na(PerfSpell_g0_Delinq_Shift), PerfSpell_g0_Delinq_Shift := 0] # All first observations have g0_Delinq_Shift = NA; set these values to zero.
-datCredit_real[is.na(PerfSpell_Key), PerfSpell_g0_Delinq_Shift := NA] # Ensure that this performance spell level variable is undefined for default spells.
-datCredit_real$PerfSpell_g0_Delinq_Shift %>% table() %>% prop.table() # [PerfSpell_g0_Delinq_Shift] has 2 levels and no missing values. 96.64% of observations have a shift in delinquency and 3.36% of observations have no shifts in delinquency.
-
-# - Indicator for when a shift in the state of g0_Delinq occurs (target event) --- Default spell level
-datCredit_real[, DefSpell_g0_Delinq_Shift := ifelse(lag(g0_Delinq, n=1)==g0_Delinq,0,1), by=list(DefSpell_Key)]
-datCredit_real[is.na(DefSpell_g0_Delinq_Shift), DefSpell_g0_Delinq_Shift := 0] # All first observations have g0_Delinq_Shift = NA; set these values to zero.
-datCredit_real[is.na(DefSpell_Key), DefSpell_g0_Delinq_Shift := NA] # Ensure that this default spell level variable is undefined for performance spells.
-datCredit_real$DefSpell_g0_Delinq_Shift %>% table() %>% prop.table() # [DefSpell_g0_Delinq_Shift] has 2 levels and no missing values. 85.82% of observations have a shift in delinquency and  14.18% of observations have no shifts in delinquency.
-
-# - State number --- Performance spell level
-datCredit_real[, PerfSpell_g0_Delinq_Num := cumsum(PerfSpell_g0_Delinq_Shift), by=list(PerfSpell_Key)] # Assign state numbers over each performance spell
-datCredit_real[, PerfSpell_g0_Delinq_Num := PerfSpell_g0_Delinq_Num + 1] # Small adjustment to ensure that spell numbers can't be zero.
-datCredit_real[is.na(PerfSpell_g0_Delinq_Shift), PerfSpell_g0_Delinq_Num := NA] # Ensure that this performance spell level variable is undefined for default spells.
-hist(datCredit_real$PerfSpell_g0_Delinq_Num, breaks='FD')
-
-# - State number --- Default spell level
-datCredit_real[, DefSpell_g0_Delinq_Num := cumsum(DefSpell_g0_Delinq_Shift), by=list(DefSpell_Key)] # Assign state numbers over each default spell
-datCredit_real[, DefSpell_g0_Delinq_Num := DefSpell_g0_Delinq_Num + 1] # Small adjustment to ensure that spell numbers can't be zero.
-datCredit_real[is.na(DefSpell_g0_Delinq_Shift), DefSpell_g0_Delinq_Num := NA] # Ensure that this default spell level variable is undefined for performance spells.
-hist(datCredit_real$DefSpell_g0_Delinq_Num, breaks='FD')
-
-# - State volatility --- Performance spell level
-datCredit_real[, PerfSpell_g0_Delinq_SD := sd(g0_Delinq), by=PerfSpell_Key]
-datCredit_real[is.na(PerfSpell_g0_Delinq_Shift), PerfSpell_g0_Delinq_SD := NA] # Ensure that this performance spell level variable is undefined for default spells.
-hist(datCredit_real$PerfSpell_g0_Delinq_SD, breaks='FD')
-
-# - State volatility --- Default spell level
-datCredit_real[, DefSpell_g0_Delinq_SD := sd(g0_Delinq), by=DefSpell_Key]
-datCredit_real[is.na(DefSpell_g0_Delinq_Shift), DefSpell_g0_Delinq_SD := NA] # Ensure that this default spell level variable is undefined for performance spells.
-hist(datCredit_real$DefSpell_g0_Delinq_SD, breaks='FD')
+# - Bin [InterestRate_Margin_imputed] | Binning the variable into three equally sized bins
+datCredit_smp[, InterestRate_Margin_imputed_bin := factor(ntile(InterestRate_Margin_imputed_mean, n=3))]
+(varInfo_Num$InterestRate_Margin_Imputed_Bin <- describe(datCredit_smp$InterestRate_Margin_imputed_bin))
 
 
-# --- Analysis and Treatments of Numeric variables (ii) Analysis
-# - Compute the descriptive statistics for the numeric variables of the credit input space
-varCredit_Info_Num <- describe(subset(datCredit_smp, select = varList_Credit_Num))
+# --- Saving description objects on the disk for fast disk-based retrieval
+pack.ffdf(paste0(genObjPath,"Credit_Var_Cat_Descript"), varInfo_Cat)
 
-# - [Age_Adj]
-varCredit_Info_Num$Age_Adj # [Age_Adj] has scale [1;1305], with 68 at 50% quantile and 127 at 75% quantile and mean of 85.23.
-hist(datCredit_smp$Age_Adj, breaks = 'FD') # Distribution of [Age_Adj] is skewed to the right.
-### RESULTS: ~ No further treatment necessary => This variable relates to time and as such should not be transformed
 
-# - [PerfSpell_Num]
-varCredit_Info_Num$PerfSpell_Num # [PerfSpell_Num] has scale [1;8], with a mean of 1.067
-hist(datCredit_smp$PerfSpell_Num, breaks = 'FD') # Distribution of [PerfSpell_Num] is skewed to the right.
-### RESULTS: ~ No further treatment necessary => This variable relates to "a measure of time" and as such should not be transformed
 
-# - [g0_Delinq_Num]
-varCredit_Info_Num$g0_Delinq_Num # [g0_Delinq_Num] has scale [1;8], with a mean of 1.067
-hist(datCredit_smp$g0_Delinq_Num, breaks = 'FD') # Distribution of [PerfSpell_Num] is skewed to the right.
-### RESULTS: ~ No further treatment necessary => This variable relates to "a measure of time" and as such should not be transformed
 
-# - [PerfSpell_g0_Delinq_Num]
-varCredit_Info_Num$PerfSpell_g0_Delinq_Num # [PerfSpell_g0_Delinq_Num] has scale [1;8], with a mean of 1.067
-hist(datCredit_smp$PerfSpell_g0_Delinq_Num, breaks = 'FD') # Distribution of [PerfSpell_Num] is skewed to the right.
-### RESULTS: ~ No further treatment necessary => This variable relates to "a measure of time" and as such should not be transformed
-
-# - [DefSpell_g0_Delinq_Num]
-varCredit_Info_Num$DefSpell_g0_Delinq_Num # [DefSpell_g0_Delinq_Num] has scale [1;8], with a mean of 1.067
-hist(datCredit_smp$DefSpell_g0_Delinq_Num, breaks = 'FD') # Distribution of [PerfSpell_Num] is skewed to the right.
-### RESULTS: ~ No further treatment necessary => This variable relates to "a measure of time" and as such should not be transformed
-
-# - [Term]
-varCredit_Info_Num$Term # [Term] has scale [1;970], with 240 at 50% quantile and 240 at 75% quantile and mean of 238.2.
-hist(datCredit_smp$Term, breaks = 'FD') # Vast majority of loans centered around 240, with some other loans with a lower term and very few with a larger term.
-### RESULTS:~ No further treatment necessary => This variable relates to time and as such should not be transformed
-
-# - [InterestRate_Nom]
-varCredit_Info_Num$InterestRate_Nom # [InterestRate_Nom] has scale [0;0.2365], with 0.09 at 50% quantile and 0.1050 at 75% quantile and mean of 0.09307.
-hist(datCredit_smp$InterestRate_Nom, breaks = 'FD') # Note some outliers at 0%, which may be a special case of debt restructuring to help defaulted borroweres
-### RESULTS:~ No further treatment necessary
-
-# - [InterestRate_Margin]
-varCredit_Info_Num$InterestRate_Margin # [InterestRate_Margin] has scale [-0.1550;0.1080], with -0.0080 at 50% quantile and 0 at 75% quantile and mean of -0.007391.
-hist(datCredit_smp$InterestRate_Margin, breaks = 'FD') # Distribution is centered around zero.
-### RESULTS: ~ No further treatment necessary
-
+# --- 7. Analysis and Treatments of Numeric variables
 # - [Principal]
-varCredit_Info_Num$Principal # [Principal] has scale [0.01;208477000], with 510000 at 50% quantile and 850000 at 75% quantile and mean of 646260.
-hist(datCredit_smp$Principal, breaks='FD'); skewness(datCredit_smp$Principal, na.rm = T); datCredit_smp[Principal==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 15.13721; 0% of observations have zero values.
-# [TREATMENT] Apply Winsorisation to the upper 0.1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values)
-wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(Principal) | Principal == ""), Principal], probs = 0.999) # 99.9% quantile = 4 680 480
+varInfo_Num$Principal
+### RESULTS: [Principal] has scale [0.01;208477000], with 510000 at 50% quantile and 850000 at 75% quantile and mean of 646260.
+hist(datCredit_smp$Principal, breaks='FD'); skewness(datCredit_smp$Principal, na.rm = T); datCredit_smp[Principal==0,.N]/datCredit_smp[,.N]
+### RESULTS:    Distribution is skewed to the right; Skewness = 15.13721; 0% of observations have zero values.
+### CONCLUSION: Apply Winsorisation to the upper 0.1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values)
+# [TREATMENT] Apply Winsorisation
+(wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(Principal) | Principal == ""), Principal], probs = 0.999)) # 99.9% quantile = 4680480
 datCredit_smp[, Principal_wins := ifelse(Principal < wins_quant, Principal, wins_quant)] # Note that this is applied to the top 1%, this is since the scale is still very large when applying Winsorisation to the top 0.01%/
-(varCredit_Info_Num$Principal_wins <- describe(datCredit_smp$Principal_wins)) # [Principal_wins] has scale [0.01;4680480.00] and 0 observations have missing values; with 510000 at 50% quantile and 850000 at 75% quantile and mean of 644358.
-hist(datCredit_smp$Principal_wins, breaks='FD'); skewness(datCredit_smp$Principal_wins, na.rm = T); datCredit_smp[Principal_wins==0,.N]/datCredit_smp[,.N] # [Principal_wins] is skewed to the right; Skewness = 2.026844; 0% of variables have zero values.
-# [TREATMENT] Scale the data using min-max scaling (with shifting)
-datCredit_smp[, Principal_wins_mm_scaled := scaler(Principal_wins,shift = T)]
-(varCredit_Info_Num$Principal_wins_mm_scaled <- describe(datCredit_smp$Principal_wins_mm_scaled)) 
-hist(datCredit_smp$Principal_wins_mm_scaled, breaks='FD')
-### RESULTS: ~ Extreme outliers detected and Winsorisation applied to deal with the upper 0.1% quantile.
-###            Winsorised variable scaled using min-max scaling with no shifting.
-###            [Principal_wins_mms_scaled] has scale [0;1] and 0 observations have missing values; with 0.10896 at 50% quantile and 0.18161 at 75% quantile and mean of 0.1377.
-###            No further treatment necessary
+(varInfo_Num$Principal_wins <- describe(datCredit_smp$Principal_wins))
+### RESULTS: [Principal_wins] has scale [0.01;4680480.00] and 0 observations have missing values; with 510000 at 50% quantile and 850000 at 75% quantile and mean of 644358.
+hist(datCredit_smp$Principal_wins, breaks='FD'); skewness(datCredit_smp$Principal_wins, na.rm = T); datCredit_smp[Principal_wins==0,.N]/datCredit_smp[,.N]
+### RESULTS: [Principal_wins] is skewed to the right; Skewness = 2.026844; 0% of variables have zero values.
+### SUMMARY: Extreme outliers detected and Winsorisation applied to deal with the upper 0.1% quantile (value = 4680480).
+###          No further treatment necessary.
 
 # - [Instalment]
-varCredit_Info_Num$Instalment # [Instalment] has scale [0;16417873.80], with 4719.1 at 50% quantile and 7921.4 at 75% quantile and mean of 5947.
-hist(datCredit_smp$Instalment, breaks ='FD'); skewness(datCredit_smp$Instalment, na.rm = T); datCredit_smp[Instalment==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 490.0671; 0.31% of observations have zero values.
-# [TREATMENT] Apply Winsorisation to the upper 0.1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values)
-wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(Instalment) | Instalment == ""), Instalment], probs = 0.999) # 99.9% quantile = 43 296.14
+varInfo_Num$Instalment
+### RESULTS: [Instalment] has scale [0;16417873.80], with 4719.1 at 50% quantile and 7921.4 at 75% quantile and mean of 5947.
+hist(datCredit_smp$Instalment, breaks ='FD'); skewness(datCredit_smp$Instalment, na.rm = T); datCredit_smp[Instalment==0,.N]/datCredit_smp[,.N]
+### RESULTS:    Distribution is skewed to the right; Skewness = 490.0671; 0.31% of observations have zero values.
+### CONCLUSION: Apply Winsorisation to the upper 0.1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values)
+# [TREATMENT] Apply Winsorisation
+(wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(Instalment) | Instalment == ""), Instalment], probs = 0.999)) # 99.9% quantile = 43296.14
 datCredit_smp[, Instalment_wins := ifelse(Instalment < wins_quant, Instalment, wins_quant)]
-(varCredit_Info_Num$Instalment_wins <- describe(datCredit_smp$Instalment_wins)) # [Instalment_wins] has scale [0;43296.14] and 0 observations have missing values; with 4719.1 at 50% quantile and 7921.4 at 75% quantile and mean of 5870.
-hist(datCredit_smp$Instalment_wins, breaks='FD'); skewness(datCredit_smp$Instalment_wins, na.rm = T); datCredit_smp[Instalment_wins==0,.N]/datCredit_smp[,.N] # [Instalment_wins] is skewed to the right; Skewness = 2.005984; 0.03121732% of variables have zero values.
-# [TREATMENT] Scale the data using min-max scaling (with no shifting)
-datCredit_smp[, Instalment_wins_mm_scaled := scaler(Instalment_wins,shift = F)]
-(varCredit_Info_Num$Instalment_wins_mm_scaled <- describe(datCredit_smp$Instalment_wins_mm_scaled)) 
-hist(datCredit_smp$Instalment_wins_mm_scaled, breaks='FD')
-### RESULTS: ~ Extreme outliers detected and Winsorisation applied to deal with the upper 0.1% quantile.
-###            Winsorised variable scaled using min-max scaling with no shifting.
-###            [Instalment_mm_scaled] has scale [0;1] and 0 observations have missing values; with 0.10900 at 50% quantile and 0.18296 at 75% quantile and mean of 0.1356.
-###            No further treatment necessary
-
-# - [Receipt_Inf] Not an important variable; keep in script (caution in using variable)
-varCredit_Info_Num$Receipt_Inf # [Receipt_Inf] has scale [0;60785555.01], with 4371 at 50% quantile and 8284 at 75% quantile and mean of 14262.
-hist(datCredit_smp$Receipt_Inf, breaks='FD'); skewness(datCredit_smp$Receipt_Inf, na.rm = T); datCredit_smp[Receipt_Inf==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 64.9649; 13.22% of variables have zero values.
-# [TREATMENT] Apply Winsorisation to the upper 1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values)
-wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(Receipt_Inf) | Receipt_Inf == ""), Receipt_Inf], probs = 0.99) # 99% quantile = 153 344.9
-datCredit_smp[, Receipt_Inf_wins := ifelse(Receipt_Inf < wins_quant, Receipt_Inf, wins_quant)]
-(varCredit_Info_Num$Receipt_Inf_wins <- describe(datCredit_smp$Receipt_Inf_wins)) # [Receipt_Inf_wins] has scale [0;153344.92] and 0 observations have missing values; with 4371 at 50% quantile and 8284 at 75% quantile and mean of 8204.
-hist(datCredit_smp$Receipt_Inf_wins, breaks='FD'); skewness(datCredit_smp$Receipt_Inf_wins, na.rm = T); datCredit_smp[Receipt_Inf_wins==0,.N]/datCredit_smp[,.N] # [Receipt_Inf_wins] is skewed to the right; Skewness = 6.341937; 13.22% of variables have zero values.
-# [TREATMENT] Scale the data using min-max scaling (with no shifting)
-datCredit_smp[, Receipt_Inf_wins_mm_scaled := scaler(Receipt_Inf_wins,shift = T)]
-(varCredit_Info_Num$Receipt_Inf_wins_mm_scaled <- describe(datCredit_smp$Receipt_Inf_wins_mm_scaled)) 
-hist(datCredit_smp$Receipt_Inf_wins_mm_scaled, breaks='FD')
-### RESULTS: ~ Extreme outliers detected and Winsorisation applied to deal with the upper 1% quantile.
-###            Winsorised variable was scaled using min-max scaling with no shifting.
-###            [Receipt_Inf_wins_mm_scaled] has scale [0;1] and 0 observations have missing values; with 0.028503 at 50% quantile and 0.054022 at 75% quantile and mean of 0.0535.
-###            No further treatment necessary
-
-# - [Arrears]
-varCredit_Info_Num$Arrears # [Arrears] has scale [-1.96;2545589.79], with 0 at 50% quantile and 0 at 75% quantile and mean of 2495.
-hist(datCredit_smp$Arrears, breaks='FD'); skewness(datCredit_smp$Arrears, na.rm = T); datCredit_smp[Arrears==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 49.40433; 90.028965% of variables have zero values.
-# [TREATMENT] Apply Winsorisation to the upper 0.1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values)
-wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(Arrears) | Arrears == ""), Arrears], probs = 0.999) # 99.9% quantile = 31 765.79
-datCredit_smp[, Arrears_wins := ifelse(Arrears < wins_quant, Arrears, wins_quant)]
-(varCredit_Info_Num$Arrears_wins <- describe(datCredit_smp$Arrears_wins)) # [Arrears_wins] has scale [-1.96;31765.79] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 1071.
-hist(datCredit_smp$Arrears_wins, breaks='FD'); skewness(datCredit_smp$Arrears_wins, na.rm = T); datCredit_smp[Arrears_wins==0,.N]/datCredit_smp[,.N] # [Arrears_wins] is skewed to the right; Skewness = 5.340883; 90.30% of variables have zero values.
-# [TREATMENT] Scale the data using standardisation (the variable has negative values and therefore min-max is inappropriate; also no shifting is used)
-datCredit_smp[, Arrears_wins_norm_scaled := scaler.norm(Arrears_wins,shift = F)]
-(varCredit_Info_Num$Arrears_wins_norm_scaled <- describe(datCredit_smp$Arrears_wins_norm_scaled)) 
-hist(datCredit_smp$Arrears_wins_norm_scaled, breaks='FD')
-### RESULTS: ~ Extreme outliers detected and Winsorisation applied to deal with the upper 0.01% quantile.
-###            Variable was scaled using min-max scaling with no shifting.
-###            [Arrears_wins_norm_scaled] has scale [--0.000401275260;6.503483176980] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.2192.
-###            No further treatment necessary
+(varCredit_Info_Num$Instalment_wins <- describe(datCredit_smp$Instalment_wins))
+### RESULTS: [Instalment_wins] has scale [0;43296.14] and 0 observations have missing values; with 4719.1 at 50% quantile and 7921.4 at 75% quantile and mean of 5870.
+hist(datCredit_smp$Instalment_wins, breaks='FD'); skewness(datCredit_smp$Instalment_wins, na.rm = T); datCredit_smp[Instalment_wins==0,.N]/datCredit_smp[,.N]
+### RESULTS: [Instalment_wins] is skewed to the right; Skewness = 2.005984; 0.03121732% of variables have zero values .
+### SUMMARY: Extreme outliers detected and Winsorisation applied to deal with the upper 0.1% quantile (value = 43296.14).
+###          No further treatment necessary.
 
 # - [Balance]
-varCredit_Info_Num$Balance # [Balance] has scale [-146.71;41687282.40], with 365231.5 at 50% quantile and 692208.4 at 75% quantile and mean of 489701.
-hist(datCredit_smp$Balance, breaks = 'FD'); skewness(datCredit_smp$Balance, na.rm = T); datCredit_smp[Balance==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 4.310693; 3.79% of variables have zero values.
-# [TREATMENT] Apply Winsorisation to the upper 0.1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values)
-wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(Balance) | Balance == ""), Balance], probs = 0.999) # 99.9% quantile = 33 844 818
+varCredit_Info_Num$Balance
+### RESULTS: [Balance] has scale [-146.71;41687282.40], with 365231.5 at 50% quantile and 692208.4 at 75% quantile and mean of 489701.
+hist(datCredit_smp$Balance, breaks = 'FD'); skewness(datCredit_smp$Balance, na.rm = T); datCredit_smp[Balance==0,.N]/datCredit_smp[,.N]
+### RESULTS:    Distribution is skewed to the right; Skewness = 4.310693; 3.79% of variables have zero values.
+### CONCLUSION: Apply Winsorisation to the upper 0.1% quantile to remove the influence of outliers (which for this variable does not seem to be influential values)
+# [TREATMENT] Apply Winsorisation
+(wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(Balance) | Balance == ""), Balance], probs = 0.999)) # 99.9% quantile = 3844818
 datCredit_smp[, Balance_wins := ifelse(Balance < wins_quant, Balance, wins_quant)]
-(varCredit_Info_Num$Balance_wins <- describe(datCredit_smp$Balance_wins)) # [Balance_wins] has scale [-146.71;3844818.17] and 0 observations have missing values; with 365231.5 at 50% quantile and 692208.4 at 75% quantile and mean of 488207.
-hist(datCredit_smp$Balance_wins, breaks='FD'); skewness(datCredit_smp$Balance_wins, na.rm = T); datCredit_smp[Balance_wins==0,.N]/datCredit_smp[,.N] # [Balance_wins] is skewed to the right; Skewness = 1.941194; 3.79% of variables have zero values.
-# [TREATMENT] Scale the data using standardisation (the variable has negative values and therefore min-max is inappropriate; also no shifting is used)
-datCredit_smp[,Balance_wins_norm_scaled := scaler.norm(Balance_wins,shift = F)]
-(varCredit_Info_Num$Balance_wins_norm_scaled <- describe(datCredit_smp$Balance_wins_norm_scaled)) 
-hist(datCredit_smp$Balance_wins_norm_scaled, breaks='FD')
-### RESULTS: ~ Extreme outliers detected and Winsorisation applied to deal with the upper 0.01% quantile.
-###            Variable was scaled using min-max scaling with no shifting.
-###            [Balance_wins_norm_scaled] has scale [-0.00029373479839;7.69788622964179] and 0 observations have missing values; with 0.73124668 at 50% quantile and 1.38590199 at 75% quantile and mean of 0.9775.
-###            No further treatment necessary
+(varInfo_Num$Balance_wins <- describe(datCredit_smp$Balance_wins))
+### RESULTS: [Balance_wins] has scale [-146.71;3844818.17] and 0 observations have missing values; with 365231.5 at 50% quantile and 692208.4 at 75% quantile and mean of 488207.
+hist(datCredit_smp$Balance_wins, breaks='FD'); skewness(datCredit_smp$Balance_wins, na.rm = T); datCredit_smp[Balance_wins==0,.N]/datCredit_smp[,.N]
+### RESULTS: [Balance_wins] is skewed to the right; Skewness = 1.941194; 3.79% of variables have zero values.
+### SUMMARY: Extreme outliers detected and Winsorisation applied to deal with the upper 0.01% quantile (value = 3844818 ).
+###          Variable was scaled using min-max scaling with no shifting.
+###          No further treatment necessary
 
-# - [TimeInPerfSpell]
-varCredit_Info_Num$TimeInPerfSpell # [TimeInPerfSpell] has scale [1;1305], with 62 at 50% quantile and 118 at 75% quantile and mean of 79.55.
-hist(datCredit_smp$TimeInPerfSpell, breaks = 'FD')
-### RESULTS: ~ DO NOT APPLY ANY TRANSFORMATIONS DUE TO THE SPECIAL NATURE OF THIS VARIABLE!
 
-# - [PerfSpell_TimeEnd]
-varCredit_Info_Num$PerfSpell_TimeEnd # [PerfSpell_TimeEnd] has scale [1;1305], with 136 at 50% quantile and 194 at 75% quantile and mean of 139.2.
-hist(datCredit_smp$PerfSpell_TimeEnd, breaks = 'FD')
-### RESULTS: ~ DO NOT APPLY ANY TRANSFORMATIONS DUE TO THE SPECIAL NATURE OF THIS VARIABLE!
 
-# - [PerfSpell_Age]
-varCredit_Info_Num$PerfSpell_Age # [PerfSpell_Age] has scale [1;1305], with 129 at 50% quantile and 191 at 75% quantile and mean of 134.5.
-hist(datCredit_smp$PerfSpell_Age, breaks = 'FD')
-### RESULTS: ~ DO NOT APPLY ANY TRANSFORMATIONS DUE TO THE SPECIAL NATURE OF THIS VARIABLE!
 
-# - [Event_Time]   
-varCredit_Info_Num$Event_Time # [Event_Time] has scale [1;1305, with 142 at 50% quantile and 197 at 75% quantile and mean of 143.8.
-hist(datCredit_smp$Event_Time, breaks = 'FD')
-### RESULTS: ~ DO NOT APPLY ANY TRANSFORMATIONS DUE TO THE SPECIAL NATURE OF THIS VARIABLE!
-
-# - [TimeInDefSpell]
-varCredit_Info_Num$TimeInDefSpell # [TimeInDefSpell] has scale [1;571], with 11 at 50% quantile and 24 at 75% quantile and mean of 21.04.
-hist(datCredit_smp$TimeInDefSpell, breaks = 'FD')
-### RESULTS: ~ DO NOT APPLY ANY TRANSFORMATIONS DUE TO THE SPECIAL NATURE OF THIS VARIABLE!
-
-# - [DefSpellResol_TimeEnd]
-varCredit_Info_Num$DefSpellResol_TimeEnd # [DefSpellResol_TimeEnd] has scale [1;1202], with 98 at 50% quantile and 178 at 75% quantile and mean of 121.4.
-hist(datCredit_smp$DefSpellResol_TimeEnd, breaks = 'FD')
-### RESULTS: ~ DO NOT APPLY ANY TRANSFORMATIONS DUE TO THE SPECIAL NATURE OF THIS VARIABLE!
-
-# - [DefSpell_Age]
-varCredit_Info_Num$DefSpell_Age # [DefSpell_Age] has scale [1;402], with 26 at 50% quantile and 47 at 75% quantile and mean of 37.64.
-hist(datCredit_smp$DefSpell_Age, breaks = 'FD')
-### RESULTS: ~ DO NOT APPLY ANY TRANSFORMATIONS DUE TO THE SPECIAL NATURE OF THIS VARIABLE!
-
-# - [FurtherLoan_Amt]
-varCredit_Info_Num$FurtherLoan_Amt # [FurtherLoan_Amt] has scale [0;2081864.654560], with 0 at 50% quantile and 0 at 75% quantile and mean of 196.2.
-hist(datCredit_smp$FurtherLoan_Amt, breaks='FD'); skewness(datCredit_smp$FurtherLoan_Amt, na.rm = T); datCredit_smp[FurtherLoan_Amt==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 61.26655; 96.05% of variables have zero values.
-# [TREATMENT] Scale the data using min-max scaling (with no shifting)
-datCredit_smp[, FurtherLoan_Amt_mm_scaled := scaler(FurtherLoan_Amt,shift = F)]
-(varCredit_Info_Num$FurtherLoan_Amt_mm_scaled <- describe(datCredit_smp$FurtherLoan_Amt_mm_scaled)) 
-hist(datCredit_smp$FurtherLoan_Amt_mm_scaled, breaks='FD')
-### RESULTS: ~ Extreme outliers detected, but this is expected since loans are rarely "extended".
-###            Winsorised variable was scaled using min-max scaling with no shifting.
-###            [FurtherLoan_Amt_mm_scaled] has scale [0;1] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.00009425.
-###            No further treatment necessary
-
-# - [Redrawn_Amt]        
-varCredit_Info_Num$Redrawn_Amt # [Redrawn_Amt] has scale [0;9417751.24377500], with 0 at 50% quantile and 0 at 75% quantile and mean of 2180.
-hist(datCredit_smp$Redrawn_Amt, breaks='FD'); skewness(datCredit_smp$Redrawn_Amt, na.rm = T); datCredit_smp[Redrawn_Amt==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 61.26655; 96.05% of variables have zero values.
-# [TREATMENT] Apply Winsorisation to the upper 0.01% quantile to remove the influence of extreme outliers (which for this variable does not seem to be influential values)
-wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(Redrawn_Amt) | Redrawn_Amt == ""), Redrawn_Amt], probs = 0.9999) # 99.99% quantile = 1 075 488
-datCredit_smp[, Redrawn_Amt_wins := ifelse(Redrawn_Amt < wins_quant, Redrawn_Amt, wins_quant)]
-(varCredit_Info_Num$Redrawn_Amt_wins <- describe(datCredit_smp$Redrawn_Amt_wins)) # [Redrawn_Amt_wins] has scale [0;1075488.46220894] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 2120.
-hist(datCredit_smp$Redrawn_Amt_wins, breaks='FD'); skewness(datCredit_smp$Redrawn_Amt_wins, na.rm = T); datCredit_smp[Redrawn_Amt_wins==0,.N]/datCredit_smp[,.N] # [Redrawn_Amt_wins] is skewed to the right; Skewness = 23.3661; 96.05% of values have zero values.
-# [TREATMENT] Scale the data using min-max scaling (with shifting)
-datCredit_smp[, Redrawn_Amt_wins_mm_scaled := scaler(Redrawn_Amt_wins,shift = F)]
-(varCredit_Info_Num$Redrawn_Amt_wins_mm_scaled <- describe(datCredit_smp$Redrawn_Amt_wins_mm_scaled)) 
-hist(datCredit_smp$Redrawn_Amt_wins_mm_scaled, breaks='FD')
-### RESULTS: ~ Extreme outliers detected and Winsorisation applied to deal with the upper 0.01% quantile.
-###            Winsorised variable was scaled using min-max scaling with no shifting.
-###            [Redrawn_Amt_wins_mm_scaled] has scale [0;1] and 0 observations have missing values; with 0 at 50% quantile and 0 at 75% quantile and mean of 0.001971.
-###            No further treatment necessary
-
+# --- 8. Feature Engineering: ratio-type varaibles (Period-level)
 # - [AgeToTerm]
-varCredit_Info_Num$AgeToTerm # [AgeToTerm] has scale [0.002673797;22.400000000], with 0.28750 at 50% quantile and 0.53750 at 75% quantile and mean of 0.3647.
-hist(datCredit_smp$AgeToTerm, breaks='FD'); skewness(datCredit_smp$AgeToTerm, na.rm = T); datCredit_smp[AgeToTerm==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 8.137409; 0% of variables have zero values.
-# [TREATMENT] Apply Winsorisation to the upper 1% quantile to remove the influence of extreme outliers (which for this variable does not seem to be influential values)
-wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(AgeToTerm) | AgeToTerm == ""), AgeToTerm], probs = 0.999) # 99.9% quantile = 2.483333
+varInfo_Num$AgeToTerm
+### RESULTS: [AgeToTerm] has scale [0.002673797;22.400000000], with 0.28750 at 50% quantile and 0.53750 at 75% quantile and mean of 0.3647.
+hist(datCredit_smp$AgeToTerm, breaks='FD'); skewness(datCredit_smp$AgeToTerm, na.rm = T); datCredit_smp[AgeToTerm==0,.N]/datCredit_smp[,.N]
+### RESULTS:    Distribution is skewed to the right; Skewness = 8.137409; 0% of variables have zero values.
+### CONCLUSION: Apply Winsorisation to the upper 1% quantile to remove the influence of extreme outliers (which for this variable does not seem to be influential values)
+# [TREATMENT] Apply Winsorisation
+(wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(AgeToTerm) | AgeToTerm == ""), AgeToTerm], probs = 0.999)) # 99.9% quantile = 2.483333
 datCredit_smp[, AgeToTerm_wins := ifelse(AgeToTerm < wins_quant, AgeToTerm, wins_quant)]
-(varCredit_Info_Num$AgeToTerm_wins <- describe(datCredit_smp$AgeToTerm_wins)) # [AgeToTerm_wins] has scale [0.002673797;2.483333333] and 0 observations have missing values; with 0.28750 at 50% quantile and 0.53750 at 75% quantile and mean of 0.3628.
-hist(datCredit_smp$AgeToTerm_wins, breaks='FD'); skewness(datCredit_smp$AgeToTerm_wins, na.rm = T); datCredit_smp[AgeToTerm_wins==0,.N]/datCredit_smp[,.N] # [AgeToTerm_wins] is skewed to the right; Skewness = 1.489611; 0% of values have zero values.
-# [TREATMENT] Scale the data using min-max scaling (with shifting)
-datCredit_smp[, AgeToTerm_wins_mm_scaled := scaler(AgeToTerm_wins,shift = F)]
-(varCredit_Info_Num$AgeToTerm_wins_mm_scaled <- describe(datCredit_smp$AgeToTerm_wins_mm_scaled)) 
-hist(datCredit_smp$AgeToTerm_wins_mm_scaled, breaks='FD')
-### RESULTS: ~ Extreme outliers detected and Winsorisation applied to deal with the upper 0.1% quantile.
-###            Winsorised variable was scaled using min-max scaling with no shifting.
-###            [AgeToTerm_wins_mm_scaled] has scale [0;1] and 0 observations have missing values; with 0.11590 at 50% quantile and 0.21668 at 75% quantile and mean of 0.1462.
-###            No further treatment necessary
+(varInfo_Num$AgeToTerm_wins <- describe(datCredit_smp$AgeToTerm_wins))
+### RESULTS: [AgeToTerm_wins] has scale [0.002673797;2.483333333] and 0 observations have missing values; with 0.28750 at 50% quantile and 0.53750 at 75% quantile and mean of 0.3628.
+hist(datCredit_smp$AgeToTerm_wins, breaks='FD'); skewness(datCredit_smp$AgeToTerm_wins, na.rm = T); datCredit_smp[AgeToTerm_wins==0,.N]/datCredit_smp[,.N]
+### RESULTS: [AgeToTerm_wins] is skewed to the right; Skewness = 1.489611; 0% of values have zero values.
+### SUMMARY: Extreme outliers detected and Winsorisation applied to deal with the upper 0.1% quantile (value = 2.483333).
+###          Winsorised variable was scaled using min-max scaling with no shifting.
+###          No further treatment necessary
 
 # - [BalanceToTerm]
-varCredit_Info_Num$BalanceToTerm # [BalanceToTerm] has scale [-0.61129166667;173697.00999999998], with 1540.4410 at 50% quantile and 2910.6708 at 75% quantile and mean of 2070.
-hist(datCredit_smp$BalanceToTerm, breaks='FD'); skewness(datCredit_smp$BalanceToTerm, na.rm = T); datCredit_smp[BalanceToTerm==0,.N]/datCredit_smp[,.N]# Distribution is skewed to the right; Skewness = 5.934091; 3.552881% of variables have zero values.
-# [TREATMENT] Apply Winsorisation to the upper 0.1% quantile to remove the influence of extreme outliers (which for this variable does not seem to be influential values)
-wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(BalanceToTerm) | BalanceToTerm == ""), BalanceToTerm], probs = 0.999) # 99.9% quantile = 17 659.6 
+varInfo_Num$BalanceToTerm
+## RESULTS: [BalanceToTerm] has scale [-0.61129166667;173697.00999999998], with 1540.4410 at 50% quantile and 2910.6708 at 75% quantile and mean of 2070.
+hist(datCredit_smp$BalanceToTerm, breaks='FD'); skewness(datCredit_smp$BalanceToTerm, na.rm = T); datCredit_smp[BalanceToTerm==0,.N]/datCredit_smp[,.N]
+### RESULTS:    Distribution is skewed to the right; Skewness = 4.784716; 3.789549% of variables have zero values.
+### CONCLUSION: Apply Winsorisation to the upper 0.1% quantile to remove the influence of extreme outliers (which for this variable does not seem to be influential values)
+# [TREATMENT] Apply Winsorisation
+(wins_quant <- quantile(datCredit_smp[!is.na(PerfSpell_Key) & !(is.na(BalanceToTerm) | BalanceToTerm == ""), BalanceToTerm], probs = 0.999)) # 99.9% quantile = 17659.6 
 datCredit_smp[, BalanceToTerm_wins := ifelse(BalanceToTerm < wins_quant, BalanceToTerm, wins_quant)]
-(varCredit_Info_Num$BalanceToTerm_wins <- describe(datCredit_smp$BalanceToTerm_wins)) # [BalanceToTerm_wins] has scale [-0.61129166667;17659.6] and 0 observations have missing values; with 1540.4410 at 50% quantile and 2910.6708 at 75% quantile and mean of 2062.
-hist(datCredit_smp$BalanceToTerm_wins, breaks='FD'); skewness(datCredit_smp$BalanceToTerm_wins, na.rm = T); datCredit_smp[BalanceToTerm_wins==0,.N]/datCredit_smp[,.N] # [BalanceToTerm_wins] is skewed to the right; Skewness = 2.087682; 3.48% of values have zero values.
-# [TREATMENT] Scale the data using standardisation (the variable has negative values and therefore min-max is inappropriate; also no shifting is used)
-datCredit_smp[,BalanceToTerm_wins_norm_scaled := scaler.norm(BalanceToTerm_wins,shift = F)]
-(varCredit_Info_Num$BalanceToTerm_wins_norm_scaled <- describe(datCredit_smp$BalanceToTerm_wins_norm_scaled)) 
-hist(datCredit_smp$BalanceToTerm_wins_norm_scaled, breaks='FD')
-### RESULTS: ~ Extreme outliers detected and Winsorisation applied to deal with the upper 0.1% quantile.
-###            Winsorised variable was scaled using min-max scaling with no shifting.
-###            [BalanceToTerm_wins_mm_scaled] has scale [-0.00028717652441;8.29623799867224] and 0 observations have missing values; with 0.7236782 at 50% quantile and 1.3673936 at 75% quantile and mean of 0.9685.
-###            No further treatment necessary
+(varInfo_Num$BalanceToTerm_wins <- describe(datCredit_smp$BalanceToTerm_wins))
+### RESULTS: [BalanceToTerm_wins] has scale [-0.61129166667;17659.6] and 0 observations have missing values; with 1540.4410 at 50% quantile and 2910.6708 at 75% quantile and mean of 2062.
+hist(datCredit_smp$BalanceToTerm_wins, breaks='FD'); skewness(datCredit_smp$BalanceToTerm_wins, na.rm = T); datCredit_smp[BalanceToTerm_wins==0,.N]/datCredit_smp[,.N]
+### RESULTS: [BalanceToTerm_wins] is skewed to the right; Skewness = 2.087682; 3.48% of values have zero values.
+### SUMMARY: Extreme outliers detected and Winsorisation applied to deal with the upper 0.1% quantile (value = 17659.6).
+###          Winsorised variable was scaled using min-max scaling with no shifting.
+###          No further treatment necessary
 
 
 # --- Save object to disk
-pack.ffdf(paste0(genObjPath,"Credit_Var_Num_Descript"), varCredit_Info_Num)
+pack.ffdf(paste0(genObjPath,"Credit_Var_Num_Descript"), varInfo_Num)
 
 
 # --- Combine objects into a singe object and store to disk -> This object then describes all covariates
-if (!exists('varSLC_Info_Cat')) unpack.ffdf(paste0(genObjPath,"SLC_Var_Cat_Descript"), tempPath)
-if (!exists('varSLC_Info_Num')) unpack.ffdf(paste0(genObjPath,"SLC_Var_Num_Descript"), tempPath)
-if (!exists('varCredit_Info_Cat')) unpack.ffdf(paste0(genObjPath,"Credit_Var_Cat_Descript"), tempPath)
-if (!exists('varCredit_Info_Num')) unpack.ffdf(paste0(genObjPath,"Credit_Var_Num_Descript"), tempPath)
+if (!exists('varInfo_Cat')) unpack.ffdf(paste0(genObjPath,"Credit_Var_Cat_Descript"), tempPath)
+if (!exists('varInfo_Num')) unpack.ffdf(paste0(genObjPath,"Credit_Var_Num_Descript"), tempPath)
 
-Covariate_Info <- c(varSLC_Info_Cat,varSLC_Info_Num,varCredit_Info_Cat,varCredit_Info_Num)
+Covariate_Info <- c(varInfo_Cat,varInfo_Num)
 
 # --- Save object to disk
 pack.ffdf(paste0(genObjPath,"All_Var_Descript"), Covariate_Info)
@@ -914,6 +655,8 @@ gc()
 
 # ------ 7. Implementing a resampling scheme with spell-level clustering
 # --- Implement resampling scheme using given main sampling fraction
+# - Load in fused subsampled dataset (if not already in memory)
+if (!exists('datCredit_real')) unpack.ffdf(paste0(genPath,"creditdata_final_smp_b"), tempPath)
 # - Setting the seed
 set.seed(1)
 # - Obtain the first observation of each performance- and default spells (in doing so we obtain all the unique PerfSpell_Keys and DefSpell_Keys)
@@ -968,78 +711,4 @@ suppressWarnings(rm(dat_keys_smp_perf, dat_keys_smp_perf,  dat_train_keys_perf, 
                     check.4_a, check.4_b, check.4_c, check.5_a, check.5_b))
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ------ 2. Default spell exclusions
-# --- Load in Dataset
-if (!exists('datCredit_smp')) unpack.ffdf(paste0(genPath,"creditdata_final4d"), tempPath)
-
-# --- Applying the exclusions
-datCredit_smp <- subset(datCredit_smp, !is.na(PerfSpell_Key))
-
-# --- [SANITY CHECK]
-# - Creating checks
-sum_defaults <- sum(is.na(datCredit_smp$PerfSpell_Num) > 0)
-check.fuse1 <- sum_defaults == 0
-
-# - Reporting
-cat(check.fuse1 %?% 'SAFE: All default spells removed, fusion successfull.' %:%
-      'WARNING: Default spells detected, fusion not successfull.')
-
-# Conditional reporting
-if (check.fuse1 == 0) {
-  cat('NOTE: ', check.fuse1, 'observations from default spells detected',"\n",sep="\t")
-}
-
-# --- Saving endpoint
-pack.ffdf(paste0(genPath,"creditdata_analytics"), datCredit_smp)
 

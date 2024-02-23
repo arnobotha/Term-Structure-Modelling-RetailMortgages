@@ -1,6 +1,6 @@
 # ====================================== Cox PH Model (Quasi-Complete Separation) ======================================
-# Fitting Cox Proportional Hazard (PH) models using g0_Delinq, which is a variable known to cause quasi-complete
-# separation issues.
+# Fitting Cox Proportional Hazard (PH) models using g0_Delinq, which is a variable known to cause complete/
+# quasi-complete separation issues.
 # -----------------------------------------------------------------------------------------
 # PROJECT TITLE: Default survival modelling
 # SCRIPT AUTHOR(S): Marcel Muller
@@ -47,7 +47,7 @@ dat_train2$PerfSpellResol_Type_Hist %>% table() %>% prop.table()
 set.seed(123)
 
 # --- Experiments 1
-# - Random assignment of levels whete g0_Delinq=3
+# - Random assignment of levels where g0_Delinq=3
 #  Applying random sampling to instances where g0_Delinq==3 with values c(0,1,2) with uniform probabilities (1/3)
 dat_train2[, g0_Delinq2a := ifelse(g0_Delinq!=3, g0_Delinq, sample(x = 0:2, size=1, prob=rep(1/3, times = 3)))]
 #  Applying random sampling to instances where g0_Delinq==3 with values c(0,1,2) with prior probabilities of g0_Delinq
@@ -149,7 +149,7 @@ dat_train2[, g0_Delinq5_lag_3_f := factor(g0_Delinq5_lag_3_f), by=PerfSpell_Key]
 
 
 # --- Final Preparation
-# - Transforming the Default status into a numeric variable to ensure compatibility with time-dependent AUC/ ROC functions
+# - Transforming the Default status into a numeric variable to ensure compatibility with time-dependent AUC/ROC functions
 dat_train2[, DefaultStatus1 := as.numeric(DefaultStatus1)]; dat_train2[,DefaultStatus1 := ifelse(DefaultStatus1==1,0,1)]
 # - Grouping the data according to PerfSpell_Key and TimeInPerfSpell
 dat_train2 <- dat_train2 %>% group_by(PerfSpell_Key, TimeInPerfSpell)

@@ -88,32 +88,32 @@ Username <- Sys.getenv("USERNAME")
 # - Setting the paths conditional on the current active user
 if (Username == "WRQ"){ ### - Paths for AB
   # Custom path where R-scripts are saved
-  path_cust <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Scripts/"
+  path_cust <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Scripts/"
   
   # Common path for storing important R-objects as back-up
-  genObjPath <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Objects/"
-  genObjPath_Res <- "C:/Users/WRQ/OneDrive - FRG/Default Survival Modelling/Objects/Resampling Schemes/" # Excel sheets for resampling tests
+  genObjPath <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Objects/"
+  genObjPath_Res <- "C:/Users/WRQ/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Objects/Resampling Schemes/" # Excel sheets for resampling tests
   
   # Common path for saving important analytics (e.g., sampling)
-  genFigPath <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Figures/" # General folder path
-  genFigPath_CumHaz <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Figures/Baseline Hazard Comparison/" # Figures of baseline (cumulative) hazard comparison
-  genFigPath_Res <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Figures/Resampling Comparison/Main/" # Figures of resampling tests
-  genFigPath_Res_anc <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Figures/Resampling Comparison/Exploratory/" # Ancillary figures of resampling tests
-  genFigPath_ass <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Figures/Modelling Assumptions/" # Modelling assumptions path
+  genFigPath <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/" # General folder path
+  genFigPath_CumHaz <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Baseline Hazard Comparison/" # Figures of baseline (cumulative) hazard comparison
+  genFigPath_Res <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Resampling Comparison/Main/" # Figures of resampling tests
+  genFigPath_Res_anc <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Resampling Comparison/Exploratory/" # Ancillary figures of resampling tests
+  genFigPath_ass <- "C:/Users/WRQ/OneDrive - FRG/Analytix/Research/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Modelling Assumptions/" # Modelling assumptions path
 } else if (Username == "R5532132"){ ### - Paths for MM
   # Custom path where R-scripts are saved
-  path_cust <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Scripts/"
+  path_cust <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Scripts/"
   
   # Common path for storing important R-objects as back-up
-  genObjPath <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Objects/" # General objects"
-  genObjPath_Res <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Objects/Resampling Schemes/" # Excel sheets for resampling tests
+  genObjPath <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Objects/" # General objects"
+  genObjPath_Res <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Objects/Resampling Schemes/" # Excel sheets for resampling tests
   
   # Common path for saving important analytics (e.g., sampling)
-  genFigPath <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Figures/" # General folder path
-  genFigPath_CumHaz <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Figures/Baseline Hazard Comparison/" # Figures of baseline (cumulative) hazard comparison
-  genFigPath_Res <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Figures/Resampling Comparison/Main/" # Figures of resampling tests
-  genFigPath_Res_anc <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Figures/Resampling Comparison/Exploratory/" # Ancillary figures of resampling tests
-  genFigPath_ass <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Figures/Modelling Assumptions/" # Modelling assumptions path
+  genFigPath <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/" # General folder path
+  genFigPath_CumHaz <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Baseline Hazard Comparison/" # Figures of baseline (cumulative) hazard comparison
+  genFigPath_Res <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Resampling Comparison/Main/" # Figures of resampling tests
+  genFigPath_Res_anc <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Resampling Comparison/Exploratory/" # Ancillary figures of resampling tests
+  genFigPath_ass <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Modelling Assumptions/" # Modelling assumptions path
 } else { ### - If username not found in if statements, execution stops
   stop("User-specific paths not set for current user: ", Username, ". Please fix in setup script (0.Setup.R) before continuing.")
 }

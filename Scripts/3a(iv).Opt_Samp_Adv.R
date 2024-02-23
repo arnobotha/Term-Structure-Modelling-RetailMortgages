@@ -124,8 +124,8 @@ confLevel <- 0.95
 cpu.threads <- 6
 confLevel <- 0.95
 # - Iteration parameters
-smp_size_v <- c(seq(from=2500, to=15000, by=2500)) # , seq(from=30000, to=75000, by=5000))
-                # seq(from=82500, to=150000, by=7500), seq(from=165000, to=255000, by=15000),
+smp_size_v <- c(# seq(from=2500, to=25000, by=2500), seq(from=30000, to=75000, by=5000))
+                seq(from=82500, to=105000, by=7500)) #, seq(from=165000, to=255000, by=15000)),
                 # seq(from=285000, to=465000, by=30000), seq(from=505000, to=655000, by=50000))
 seed_v <- c(1:100)
 # - Sampling fraction
@@ -399,7 +399,7 @@ proc.time() - ptm  #IGNORE: for computation time calculation
 
 
 # --- Cleanup
-rm(test, ptm)
+rm(test, ptm); gc()
 
 
 # --- Main Loop (outer function call)
@@ -441,7 +441,7 @@ cat(paste0("\n3 (", Sys.time(),"). ForEach-loop done. Elapsed time: ", round(t[3
     file="subsampleLoop_Adv.txt", append=T)
 
 # - Save to disk (zip) for quick disk-based retrieval later
-pack.ffdf(paste0("C:/Users/R5532132/OneDrive - FRG/", "subSampleSizes_Adv"), datResults); gc()
+pack.ffdf(paste0("C:/Users/R5532132/OneDrive - FRG/", "subSampleSizes_Adv2"), datResults); gc()
 stopCluster(cl.port)
 
 
@@ -450,14 +450,23 @@ stopCluster(cl.port)
 # ------ 3. Graphing
 # --- Load in Dataset
 if (!exists('datResults')) unpack.ffdf(paste0(genObjPath,"subSampleSizes_Adv"), tempPath)
+# - Confidence interval parameter
+# confLevel <- 0.95
 
+# datResults1 <- copy(datResults); rm(datResults); gc()
+# if (!exists('datResults')) unpack.ffdf(paste0(genObjPath,"subSampleSizes_Adv2"), tempPath)
+# datResults2 <- copy(datResults); rm(datResults); gc()
+# datResults <- rbind(datResults1, datResults2); rm(datResults1, datResults2); gc()
+
+# --- Populating the results dataset for each iteration
+datResults[, SubSample_Size := as.vector(sapply(X=smp_size_v, function(x) rep(x, length(seed_v))))]
 
 # --- Aggregate to subsample size level
 datGraph <- datResults[, list(PriorProb_MAE = mean(Err_PriorProb_AE , na.rm=T), PriorProb_MAE_SD = sd(Err_PriorProb_AE , na.rm=T),
                               PriorProb_RMSE = sqrt(sum(Err_PriorProb_SqrdErr, na.rm=T)/.N), PriorProb_RMSE_SE = sd(Err_PriorProb_SqrdErr, na.rm=T),
                               EventRate_PopTrain_MAE_Mean = mean(Err_EventRate_PopTrain_MAE, na.rm=T), EventRate_PopTrain_MAE_SD = sd(Err_EventRate_PopTrain_MAE, na.rm=T),
                               EventRate_TrainValid_MAE_Mean = mean(Err_EventRate_TrainValid_MAE, na.rm=T), EventRate_TrainValid_MAE_SD = sd(Err_EventRate_TrainValid_MAE, na.rm=T),
-                              SubSample_FullSize_Mean = round(mean(SubSample_FullSize, na.rm=T)), N=.N),
+                              SubSample_Size_Mean = round(mean(SubSample_Size, na.rm=T)), SubSample_FullSize_Mean = round(mean(SubSample_FullSize, na.rm=T)), N=.N),
                        by=list(SubSample_Size)]
 
 # --- Create 95% confidence interval for point estimate (mean) : Population-training set comparison
@@ -506,8 +515,8 @@ datGraph3 <- merge(datGraph2, datGraph2_margins, by=c("SubSample_FullSize_Mean",
 # --- Find elbow point where differential between subsequent error values becomes negligible
 ### I.e., find x where 2nd derivative of f(x) is near zero
 # - Compute gradients
-datEventRate_PopTrain_1st <- datGraph[order(SubSample_Size), list(Gradient = diff(EventRate_PopTrain_MAE_Mean) / diff(SubSample_Size))]$Gradient
-datEventRate_TrainValid_1st <- datGraph[order(SubSample_Size), list(Gradient = diff(EventRate_TrainValid_MAE_Mean) / diff(SubSample_Size))]$Gradient
+datEventRate_PopTrain_1st <- datGraph[order(SubSample_Size), list(Gradient = diff(EventRate_PopTrain_MAE_Mean) / diff(SubSample_Size_Mean))]$Gradient
+datEventRate_TrainValid_1st <- datGraph[order(SubSample_Size), list(Gradient = diff(EventRate_TrainValid_MAE_Mean) / diff(SubSample_Size_Mean))]$Gradient
 # plot(diff(datEventRate_PopTrain_1st), type="b", main="2nd derivative") # 2nd derivative neither smooth nor monotonic
 # plot(diff(datEventRate_TrainValid_1st), type="b", main="2nd derivative") # 2nd derivative is smooth but not monotonic
 # - Find index of stationary points x such that f''(x) <= epislon
@@ -557,10 +566,10 @@ label.v2 <- list(expression(italic(D)*" vs "*italic(D[T])),
     # main line graph with overlaid points
     geom_ribbon(aes(x=SubSample_FullSize_Mean, ymin=Value_Lower, ymax=Value_Upper, fill=Set), alpha=0.5) + 
     geom_line(aes(colour=Set, linetype=Set), linewidth=0.5) + 
-    geom_point(aes(x=SubSample_FullSize_Mean, y=Value, colour=Set, shape=Set), size=1.3) + 
+    geom_point(aes(x=SubSample_FullSize_Mean, y=Value, colour=Set, shape=Set), size=1.3) +
     # annotate data table
-    # annotate(geom="table", x=4000000, y=0.011, family=chosenFont, size=2.9,
-    #          label=datAnnotate, parse=T) +
+    annotate(geom="table", x=4000000, y=0.011, family=chosenFont, size=2.9,
+             label=datAnnotate, parse=T) +
     # facets & scale options
     facet_grid(Facet_label ~ ., labeller=label_parsed) + 
     scale_colour_manual(name="Mean MAE", values=col.v, label=label.v) + 

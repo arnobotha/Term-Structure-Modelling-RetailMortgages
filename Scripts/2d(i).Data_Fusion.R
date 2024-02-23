@@ -64,49 +64,96 @@ datCredit_real <- subset(datCredit_real, select = -c(ExclusionID))
 # --- Default indicators
 # - Last-status approach
 datCredit_real[, DefaultStatus1_lead_12 := imputeLastKnown(shift(DefaultStatus1, n=12, type="lead")), by=list(LoanID)]
-datCredit_real$DefaultStatus1_lead_12 %>% table() %>% prop.table() # 93.35 % of observations have not defaulted in exactly 12 months since reporting date and 6.75% did.
+datCredit_real$DefaultStatus1_lead_12 %>% table() %>% prop.table()
+### RESUKTS: 93.35 % of observations have not defaulted in exactly 12 months since reporting date and 6.75% did.
 # Relocate variable next to current default status variable
 datCredit_real <- datCredit_real %>% relocate(DefaultStatus1_lead_12, .after=DefaultStatus1)
 
 # - Worst-ever approach
 datCredit_real[, DefaultStatus1_lead_12_max := imputeLastKnown(frollapply(x=DefaultStatus1, n=13, align="left", FUN=max)), by=list(LoanID)]
-datCredit_real$DefaultStatus1_lead_12_max %>% table() %>% prop.table() # 91.93% of observations have not defaulted in the next 12 months from reporting date, whilst 7.96% of accounts had.
+datCredit_real$DefaultStatus1_lead_12_max %>% table() %>% prop.table()
+### RESULTS: 91.93% of observations have not defaulted in the next 12 months from reporting date, whilst 7.96% of accounts had.
 # Relocate variable next to current default status variable
 datCredit_real <- datCredit_real %>% relocate(DefaultStatus1_lead_12_max, .after=DefaultStatus1_lead_12)
 
 
-# --- Creating delinquency-spell level input variables
-# - Indicator for when a shift in the state of g0_Delinq occurs (target event) --- Loan level
+# --- Delinquency-themed variables on a loan-level
+# - Embed previous defaults into a new Boolean-valued input variable
+datCredit_real[, PrevDefaults := ifelse(all(is.na(PerfSpell_Num)), F, max(PerfSpell_Num,na.rm = T) > 1), by=list(LoanID)]
+cat( (datCredit_real[is.na(PrevDefaults), .N] == 0) %?% "SAFE: No missingness, [PrevDefaults] created successfully.\n" %:%
+       "WARNING: Missingness detected, [PrevDefaults] compromised.\n")
+describe(datCredit_real$PrevDefaults); describe(datCredit_real[Counter==1, PrevDefaults])
+### RESULTS: 11.6% of records had previous defaults, which is 6.9% of accounts
+
+# - Spell-level indicator for when a shift occurs in the state of g0_Delinq (target event)
+# NOTE: This is an intermediary field used in the creation of subsequent fields
 datCredit_real[, g0_Delinq_Shift := ifelse(lag(g0_Delinq, n=1)==g0_Delinq,0,1), by=list(LoanID)]
 datCredit_real[is.na(g0_Delinq_Shift), g0_Delinq_Shift := 0] # All first observations have g0_Delinq_Shift = NA; set these values to zero.
-datCredit_real$g0_Delinq_Shift %>% table() %>% prop.table() # [g0_Delinq_Shift] has 2 levels and no missing values. 96.07% of observations have a shift in delinquency and  3.95% of observations have no shifts in delinquency.
+cat( (datCredit_real[is.na(g0_Delinq_Shift), .N] == 0) %?% "SAFE: No missingness, [g0_Delinq_Shift] created successfully.\n" %:%
+       "WARNING: Missingness detected, [g0_Delinq_Shift] compromised.\n")
+datCredit_real$g0_Delinq_Shift %>% table() %>% prop.table()
+### RESULT: 96.05% of the records had no change in their delinquency level from their associated previous record.
 
-# - State number --- Loan level
-datCredit_real[, g0_Delinq_Num := cumsum(g0_Delinq_Shift), by=list(LoanID)] # Assign state numbers over the entire loan history
-datCredit_real[, g0_Delinq_Num := g0_Delinq_Num + 1] # Small adjustment to ensure that spell numbers can't be zero.
-hist(datCredit_real$g0_Delinq_Num, breaks='FD')
+# - Delinquency state number, where each change in g_0 denotes such a "state" that may span several periods
+datCredit_real[, g0_Delinq_Num := cumsum(g0_Delinq_Shift) + 1, by=list(LoanID)] # Assign state numbers over the entire loan history (add one to ensure that there are no delinquency spell numbers equal to zero)
+cat( (datCredit_real[is.na(g0_Delinq_Num), .N] == 0) %?% "SAFE: No missingness, [g0_Delinq_Num] created successfully.\n" %:%
+       "WARNING: Missingness detected, [g0_Delinq_Num] compromised.\n")
+describe(datCredit_real$g0_Delinq_Num)
+### RESULT: Mean state number of 3.3 across all rows; median: 1; max of 100. 
+# This high max suggests outlier-accounts with rapid and frequent changes in g0
 
-# - State volatility --- Loan level
-datCredit_real[, g0_Delinq_SD := sd(g0_Delinq), by=LoanID]
-hist(datCredit_real$g0_Delinq_SD, breaks='FD')
+# - Account-level standard deviation of the delinquency state
+datCredit_real[, g0_Delinq_SD := sd(g0_Delinq, na.rm=T), by=list(LoanID)]
+datCredit_real[is.na(g0_Delinq_SD), g0_Delinq_SD := 0] # Some missing values exist at loan accounts originating at the end of the sampling period | Assign zero values to these
+cat( (datCredit_real[is.na(g0_Delinq_SD), .N] == 0) %?% "SAFE: No missingness, [g0_Delinq_SD] created successfully.\n" %:%
+       "WARNING: Missingness detected, [g0_Delinq_SD] compromised.\n")
+describe(datCredit_real[, list(g0_Delinq_SD=mean(g0_Delinq_SD, na.rm=T)), by=list(LoanID)]$g0_Delinq_SD)
+### RESULT: mean account-level SD in delinquency states of 0.21; median: 0, but 95%-percentile of 1.2
+# This suggests that most accounts do not vary significantly in their delinquency states over loan life, which is sensible
 
-# - [SANITY CHECK]
-lookup <- datCredit_real[LoanID=="3000003205066", list(LoanID, Date, PerfSpell_Key, DefSpell_Key,
-                                                      g0_Delinq, g0_Delinq_Shift, PerfSpell_g0_Delinq_Shift, DefSpell_g0_Delinq_Shift,
-                                                      g0_Delinq_Num, DefSpell_g0_Delinq_Num, PerfSpell_g0_Delinq_Num,
-                                                      g0_Delinq_SD, PerfSpell_g0_Delinq_SD, DefSpell_g0_Delinq_SD)]
-lookup2 <- datCredit_real[LoanID=="3000005788425", list(LoanID, Date, PerfSpell_Key, DefSpell_Key,
-                                                       g0_Delinq, g0_Delinq_Shift, PerfSpell_g0_Delinq_Shift, DefSpell_g0_Delinq_Shift,
-                                                       g0_Delinq_Num, DefSpell_g0_Delinq_Num, PerfSpell_g0_Delinq_Num,
-                                                       g0_Delinq_SD, PerfSpell_g0_Delinq_SD, DefSpell_g0_Delinq_SD)]
-### RESULTS:~ All variables created correctly, no problems detected.
-###           Safe to proceed.
+# - 4-,5-,6-,9- and 12 month rolling state standard deviation
+# NOTE: Usefulness of each time window length will yet be determined during prototyping/modelling
+datCredit_real[, g0_Delinq_SD_12 := frollapply(g0_Delinq, n=12, FUN=sd, align="right"), by=list(LoanID)]
+datCredit_real[, g0_Delinq_SD_9 := frollapply(g0_Delinq, n=9, FUN=sd, align="right"), by=list(LoanID)]
+datCredit_real[, g0_Delinq_SD_6 := frollapply(g0_Delinq, n=6, FUN=sd, align="right"), by=list(LoanID)]
+datCredit_real[, g0_Delinq_SD_5 := frollapply(g0_Delinq, n=5, FUN=sd, align="right"), by=list(LoanID)]
+datCredit_real[, g0_Delinq_SD_4 := frollapply(g0_Delinq, n=4, FUN=sd, align="right"), by=list(LoanID)]
+cat( ((datCredit_real[is.na(g0_Delinq_SD_4), .N] == datCredit_real[Counter<4,.N]) &
+        (datCredit_real[is.na(g0_Delinq_SD_5), .N] == datCredit_real[Counter<5,.N]) &
+        (datCredit_real[is.na(g0_Delinq_SD_6), .N] == datCredit_real[Counter<6,.N]) &
+        (datCredit_real[is.na(g0_Delinq_SD_9), .N] == datCredit_real[Counter<9,.N]) &
+        (datCredit_real[is.na(g0_Delinq_SD_12), .N] == datCredit_real[Counter<12,.N])) %?% "SAFE: No excessive missingness, [g0_Delinq_SD_4], [g0_Delinq_SD_5], [g0_Delinq_SD_6], [g0_Delinq_SD_9], and [g0_Delinq_SD_12] created successfully.\n" %:%
+       "WARNING: Excessive missingness detected, [g0_Delinq_SD_4], [g0_Delinq_SD_5], [g0_Delinq_SD_6], [g0_Delinq_SD_9], and/or [g0_Delinq_SD_12] compromised.\n")
 
-# - Clean up
-rm(lookup, lookup2)
+# - Time in delinquency state
+# NOTE: This variable is conceptually different to [TimeInPerfSpell].
+# A performance spell starts when a loan is not in default and ends when it is in default.
+# A delinquency spell starts when a loan "shifts" to a new delinquency level and ends the immediate period preceding the next shift to a different delinquency level.
+datCredit_real[, TimeInDelinqState := 1:.N, by=list(LoanID, g0_Delinq_Num)]
+cat( (datCredit_real[is.na(TimeInDelinqState), .N] == 0) %?% "SAFE: No missingness detected, [TimeInDelinqState] created successfully.\n" %:%
+       "WARNING: Missingness detected, [TimeInDelinqState] compromised.\n")
 
-# - Save snapshot to disk (zip) for quick disk-based retrieval later
+
+# --- Delinquency-themed variables on a performance spell-level
+# - Delinquency state number, where each change in g_0 denotes such a "state" that may span several periods during a performance spell
+datCredit_real[!is.na(PerfSpell_Key), PerfSpell_g0_Delinq_Num := cumsum(g0_Delinq_Shift) + 1, by=list(PerfSpell_Key)] # Assign state numbers over each performance spell
+# [SANITY CHECK] Check new feature for illogical values
+cat( ( datCredit_real[is.na(PerfSpell_g0_Delinq_Num),.N]==datCredit_real[is.na(PerfSpell_Key),.N]) %?% 
+       'SAFE: New feature [PerfSpell_g0_Delinq_Num] has logical values.\n' %:% 
+       'WARNING: New feature [PerfSpell_g0_Delinq_Num] has illogical values \n' )
+
+
+
+
+# 4. ------ Saving the final dataset and doing some housekeeping
+# --- Save snapshot to disk (zip) for quick disk-based retrieval later
 pack.ffdf(paste0(genPath,"creditdata_final4"), datCredit_real)
 
-# - Housekeeping
+# --- Housekeeping
 suppressWarnings(rm(exclusions_all, exclusions_credit)); gc()
+
+
+
+
+
+
