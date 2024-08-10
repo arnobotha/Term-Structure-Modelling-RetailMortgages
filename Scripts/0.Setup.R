@@ -2,7 +2,7 @@
 # Setting up R environment, parameters, and function definitions
 # ---------------------------------------------------------------------------------------
 # PROJECT TITLE: Default survival modelling
-# SCRIPT AUTHOR(S): Dr Arno Botha, Roelinde Bester, Marcel Muller
+# SCRIPT AUTHOR(S): Dr Arno Botha, Roelinde Bester, Marcel Muller, Roland Breedt
 
 # DESCRIPTION: 
 # This script installs and loads various libraries and packages, compiles all
@@ -126,6 +126,20 @@ if (Username == "WRQ"){ ### - Paths for AB
   genFigPath_Res <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Resampling Comparison/Main/" # Figures of resampling tests
   genFigPath_Res_anc <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Resampling Comparison/Exploratory/" # Ancillary figures of resampling tests
   genFigPath_ass <- "C:/Users/R5532132/OneDrive - FRG/Default Survival Modelling/Term-Structure-Modelling-RetailMortgages/Figures/Modelling Assumptions/" # Modelling assumptions path
+} else if (Username == "R5668395"){ ### - Paths for RB
+  # Custom path where R-scripts are saved
+  path_cust <- "C:/Users/R5668395/Documents/GitHub TermStruc/Term-Structure-Modelling-RetailMortgages/Scripts/"
+  
+  # Common path for storing important R-objects as back-up
+  genObjPath <- "C:/Users/R5668395/Documents/GitHub TermStruc/Term-Structure-Modelling-RetailMortgages/Objects/" # General objects"
+  genObjPath_Res <- "C:/Users/R5668395/Documents/GitHub TermStruc/Term-Structure-Modelling-RetailMortgages/Objects/Resampling Schemes/" # Excel sheets for resampling tests
+  
+  # Common path for saving important analytics (e.g., sampling)
+  genFigPath <- "C:/Users/R5668395/Documents/GitHub TermStruc/Term-Structure-Modelling-RetailMortgages/Figures/" # General folder path
+  genFigPath_CumHaz <- "C:/Users/R5668395/Documents/GitHub TermStruc/Term-Structure-Modelling-RetailMortgages/Figures/Baseline Hazard Comparison/" # Figures of baseline (cumulative) hazard comparison
+  genFigPath_Res <- "C:/Users/R5668395/Documents/GitHub TermStruc/Term-Structure-Modelling-RetailMortgages/Figures/Resampling Comparison/Main/" # Figures of resampling tests
+  genFigPath_Res_anc <- "C:/Users/R5668395/Documents/GitHub TermStruc/Term-Structure-Modelling-RetailMortgages/Figures/Resampling Comparison/Exploratory/" # Ancillary figures of resampling tests
+  genFigPath_ass <- "C:/Users/R5668395/Documents/GitHub TermStruc/Term-Structure-Modelling-RetailMortgages/Figures/Modelling Assumptions/" # Modelling assumptions path
 } else { ### - If username not found in if statements, execution stops
   stop("User-specific paths not set for current user: ", Username, ". Please fix in setup script (0.Setup.R) before continuing.")
 }
