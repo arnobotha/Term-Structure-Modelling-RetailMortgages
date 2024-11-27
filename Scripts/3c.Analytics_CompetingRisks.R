@@ -4,7 +4,7 @@
 # distributional analysis are performed and non-parametric estimators are constructed and compared.
 # ------------------------------------------------------------------------------------------------
 # PROJECT TITLE: Default survival modelling
-# SCRIPT AUTHOR(S): Marcel Muller
+# SCRIPT AUTHOR(S): Dr Arno Botha, Marcel Muller
 # ------------------------------------------------------------------------------------------------
 # -- Script dependencies:
 #   - 2c.Data_Enrich.R
