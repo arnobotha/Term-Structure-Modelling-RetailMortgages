@@ -72,7 +72,7 @@ chosenFont <- "Cambria"
 (gsurv1c_a <- ggsurvplot(kmPerf_default_real_spell1c, fun="pct", conf.int=T, legend="none", 
                          break.time.by=round(max(kmPerf_default_real_spell1c$time)/8), palette=vCol,
                          xlab = bquote(Discrete~time~italic(t)*" (months) in performing spell: Multi-spell"),
-                         ylab = bquote(Survival~probability~"["*.(mainEventName)*"]"*~italic(S(t))*": spell-level (Kaplan-Meier)"),
+                         ylab = bquote(Survival~probability~"["*.(mainEventName)*"]"*~italic(S(t))*":  Kaplan-Meier (spell-level)"),
                          xlim=c(0, max(kmPerf_default_real_spell1c$time)+1), surv.median.line = "hv", censor=F, 
                          ggtheme = theme_bw(base_family=chosenFont), tables.theme = theme_cleantable(),
                          tables.height=0.10, tables.y.text=F, tables.y.text.col=T, risk.table = "abs_pct", risk.table.pos = "out",
@@ -84,7 +84,7 @@ chosenFont <- "Cambria"
 (gsurv1c_b <- ggsurvplot(kmPerf_default_real_spell1c, fun="event", conf.int=T, surv.scale = "percent", legend="none", 
                          break.time.by=round(max(kmPerf_default_real_spell1c$time)/8), palette=vCol,
                          xlab = bquote(Discrete~time~italic(t)*" (months) in performing spell: Multi-spell"),
-                         ylab = bquote(Cumulative~lifetime~distribution~"["*.(mainEventName)*"]"*~italic(F(t))*": spell-level (Kaplan-Meier)"),
+                         ylab = bquote(Cumulative~lifetime~distribution~"["*.(mainEventName)*"]"*~italic(F(t))*":  Kaplan-Meier (spell-level)"),
                          xlim=c(0, max(kmPerf_default_real_spell1c$time)+1), censor=F, 
                          ggtheme = theme_bw(base_family=chosenFont), tables.theme = theme_cleantable(),
                          tables.height=0.10, tables.y.text=F, tables.y.text.col=T, risk.table = "abs_pct", risk.table.pos = "out",
@@ -94,7 +94,7 @@ chosenFont <- "Cambria"
 (gsurv1c_c <- ggsurvplot(kmPerf_default_real_spell1c, fun="cumhaz",conf.int=T, legend="none", 
                          break.time.by=round(max(kmPerf_default_real_spell1c$time)/8), palette=vCol,
                          xlab = bquote(Discrete~time~italic(t)*" (months) in performing spell: Multi-spell"),
-                         ylab = bquote(Cumulative~hazard~distribution~"["*.(mainEventName)*"]"*~italic(H(t))*": spell-level (Nelson-Aalen)"),
+                         ylab = bquote(Cumulative~hazard~distribution~"["*.(mainEventName)*"]"*~italic(H(t))*": Nelson-Aalen (spell-level)"),
                          xlim=c(0,  max(kmPerf_default_real_spell1c$time)+1), censor=F, 
                          ggtheme = theme_bw(base_family=chosenFont), tables.theme = theme_cleantable(),
                          tables.height=0.10, tables.y.text=F, tables.y.text.col=T, risk.table = "abs_pct", risk.table.pos = "out",
@@ -127,7 +127,7 @@ plot(kmExample$time, haz_dat$CumulHazard - haz_dat$CumulHazard_Disc, type="b")
 (gsurv1c_d <- ggplot(haz_dat[Time<=300,], aes(x=Time,y=hazard)) + theme_minimal() +
     geom_line(linetype="solid", colour=vCol2[1]) + geom_point(colour=vCol2[1]) + 
     geom_smooth(aes(colour=Group, fill=Group), se=T, method="loess", span=sSpan, alpha=0.25, linetype="dotted") +
-    labs(y=bquote(plain(Estimated~hazard*" function ["*.(mainEventName)*"]"*~italic(h(t))*": spell-level (Kaplan-Meier)")), 
+    labs(y=bquote(plain(Estimated~hazard*" function ["*.(mainEventName)*"]"*~italic(h(t))*": Kaplan-Meier (spell-level)")), 
          x=bquote(Discrete~time~italic(t)*" (months) in spell: Multi-spell")) + 
     theme(text=element_text(family=chosenFont),legend.position="bottom") + 
     scale_colour_manual(name="", values=vCol2[2], labels=label.v) + 
