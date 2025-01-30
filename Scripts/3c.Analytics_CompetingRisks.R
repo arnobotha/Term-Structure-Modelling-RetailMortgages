@@ -66,7 +66,7 @@ label.v2 <- c(paste0("a_Settlement"="Settlement (", round(Resol_Type2.props[1]*1
               paste0("c_Written-off-Other"="Other/Write-off (", round(Resol_Type2.props[3]*100, digits=1), "%)"))
 
 
-# - Densities of resolution types overlayed
+# - Densities of resolution types overlaid
 (g1_Densities_Resol_Type <- ggplot(datSurv[PerfSpell_Age<=500,], aes(x=PerfSpell_Age, group=Resol_Type)) + theme_minimal() + 
     geom_histogram(aes(y=after_stat(density), colour=Resol_Type, fill=Resol_Type), position="identity",
                    alpha=0.75, size=0.2) + 
@@ -84,7 +84,7 @@ label.v2 <- c(paste0("a_Settlement"="Settlement (", round(Resol_Type2.props[1]*1
     scale_x_continuous(breaks=breaks_pretty(), label=comma)
 )
 
-# - Densities of competing risks overlayed
+# - Densities of competing risks overlaid
 (g2_Densities_Resol_Type2 <- ggplot(datSurv2[PerfSpell_Age<=500,], aes(x=PerfSpell_Age, group=Resol_Type2)) + theme_bw() +
     geom_histogram(aes(y=after_stat(density), colour=Resol_Type2, fill=Resol_Type2), position="identity",
                    alpha=0.75, size=0.2) + 
