@@ -356,7 +356,8 @@ datGraph <- datResults[, list(PriorProb_MAE = mean(Err_PriorProb_AE , na.rm=T), 
                               PriorProb_RMSE = sqrt(sum(Err_PriorProb_SqrdErr, na.rm=T)/.N), PriorProb_RMSE_SE = sd(Err_PriorProb_SqrdErr, na.rm=T),
                               EventRate_PopTrain_MAE_Mean = mean(Err_EventRate_PopTrain_MAE, na.rm=T), EventRate_PopTrain_MAE_SD = sd(Err_EventRate_PopTrain_MAE, na.rm=T),
                               EventRate_TrainValid_MAE_Mean = mean(Err_EventRate_TrainValid_MAE, na.rm=T), EventRate_TrainValid_MAE_SD = sd(Err_EventRate_TrainValid_MAE, na.rm=T),
-                              SubSample_FullSize_Mean = round(mean(SubSample_FullSize, na.rm=T)), N=.N),
+                              SubSample_FullSize_Mean = round(mean(SubSample_FullSize, na.rm=T)), 
+                              ElapsedTime_Mean = round(mean(ElapsedTime, na.rm=T)), N=.N),
                        by=list(SubSample_Size)]
 
 # --- Create 95% confidence interval for point estimate (mean) : Population-training set comparison
@@ -388,6 +389,7 @@ plot(x=datGraph$SubSample_FullSize_Mean, y=datGraph$PriorProb_RMSE, type="b")
 plot(x=datGraph$SubSample_FullSize_Mean, y=datGraph$EventRate_PopTrain_MAE_Mean, type="b")
 plot(x=datGraph$SubSample_FullSize_Mean, y=datGraph$EventRate_TrainValid_MAE_Mean, type="b")
 plot(x=datGraph$SubSample_FullSize_Mean, y=datGraph$EventRate_MAE_PopTrain_Mean_ErrMargin, type="b")
+plot(x=datGraph$SubSample_FullSize_Mean, y=datGraph$ElapsedTime_Mean, type="b")
 
 
 # --- Pivot for graphing purposes: 2 different set comparisons using single error measure
