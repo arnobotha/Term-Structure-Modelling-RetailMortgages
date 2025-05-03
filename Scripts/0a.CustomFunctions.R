@@ -2,12 +2,14 @@
 # Defining custom functions used across various projects
 # ------------------------------------------------------------------------------
 # PROJECT TITLE: Default Survival Modelling
-# SCRIPT AUTHOR(S): Dr Arno Botha, Roelinde Bester, Marcel Muller
+# SCRIPT AUTHOR(S): Dr Arno Botha (AB), Marcel Muller (MM)
+# VERSION: 2.0 (Apr-2025)
 
 # DESCRIPTION:
 # This script defines various functions that are used elsewhere in this project
 # or, indeed, used across other projects. Functions are grouped thematically.
 # ==============================================================================
+
 
 
 
@@ -18,8 +20,10 @@
 
 
 
+
 # -------- Utility functions
-# - Mode function (R doesn't have a built-int one)
+
+# -- Mode function (R doesn't have a built-int one)
 getmode <- function(v) {
   uniqv <- unique(v);
   # discard any missingness
@@ -27,7 +31,8 @@ getmode <- function(v) {
   uniqv[which.max(tabulate(match(v, uniqv)))]
 }
 
-# - Memory function using 'gdata' package
+
+# -- Memory function using 'gdata' package
 getMemUsage <- function(limit=1000){
   require(gdata); require(scales)
   # - Get list of significant object sizes occupied in memory, order ascendingly
@@ -41,9 +46,110 @@ getMemUsage <- function(limit=1000){
 }
 
 
-# -------- Interleaving functions
 
-# custom coalescing function to facilitate data fusion
+
+# -------- Cleaning functions (Missing/extreme value treatments)
+
+# -- Custom function that curates a main vector [x] to equal the previous/most-recent non-
+# missing element in a given vector
+imputeLastKnown <- function (x) {
+  # -- Testing purposes
+  # x <- Lookup$ZeroBal_Remain_Ind; x_lead <- Lookup$ZeroBal_Remain_Ind_lead
+  # x <- c(0,0,0,1,1,1,0,1)
+  # x <- c(0,0,0,1,1,1,0,NA)
+  # x <- c(0,0,0,1,1,1,1,NA)
+  # x <- c(0,0,0,1,NA,1,0,NA)
+  # x <- c(0,NA)
+  
+  firstOne <- which(is.na(x))[1]
+  if (!is.na(firstOne) & firstOne > 1) {
+    x[firstOne] <- x[firstOne-1]
+    # call function recursively to fix earlier missing-cases
+    return( imputeLastKnown(x))
+  } else { # no missing value found, return original vector
+    return(x)
+  }
+}
+
+
+# -- Custom function that curates a main vector [x] where x[1] is missing.
+# This is achieved by finding the first non-missing element and back-filling that value
+imputeFirstKnown <- function(x) {
+  # -- Testing purposes
+  # x <- c(NA, NA, 2,3,4)
+  firstOne <- which(!is.na(x))[1]
+  if (!is.na(firstOne) & firstOne > 1) {
+    x[1:(firstOne-1)] <- x[firstOne]
+    return(x)
+  } else { # no non-missing value found, return original vector
+    return(x)
+  }
+}
+
+
+# -- Custom Function by which to adjust for inflation
+# Assumes a monthly macroeconomic dataset [macro_data_hist] to exist with [Date_T] and [Inflation] fields
+adjInflation <- function(g_start, g_stop) {
+  compFact <- macro_data_hist[Date_T >= g_start & Date_T <= g_stop, list(Factor = prod(1 + (Inflation/100)/12))]
+  return(compFact)
+}
+
+
+# - Adjusting for inflation (Robust version that accepts a macroeconomic dataset)
+# Generating an inflation factor for a given series of yearly inflation growth rates
+# Input:  [datMacro]: The dataset containing the yearly inflation growth rate
+#         [time]: Name of the time/date variable in [datMacro]
+#         [g_start]:  The starting date for the series of inflation growth rates
+#         [g_stop]:   The ending date for the series of inflation growth rates
+# Output: A factor indicating the cumulative inflation over the period starting at [g_start] and ending [g_stop]
+# --- Define custom function for computing inflation/deflation factors
+adjInflation_MV <- function(datMacro, time, Inflation_Growth, g_start, g_stop) {
+  # datMacro=datMV; time="Date"; g_start<-date("2015-02-28"); g_stop<-date("2022-12-31"); Inflation_Growth<-"M_Inflation_Growth"
+  compFact <- as.numeric(datMacro[get(time) >= g_start & get(time) <= g_stop, list(Factor = prod(1 + (get(Inflation_Growth))/12))])
+  return(compFact)
+  # rm(datMacro, time, g_start, g_stop, Inflation_Growth); gc()
+}
+# - Unit test
+# if (!exists('datMV')) unpack.ffdf(paste0(genPath,"datMV"), tempPath)
+# (test <- adjInflation(datMacro=datMV, time="Date", g_start=date("2015-02-28"), g_stop=date("2022-12-31"), Inflation_Growth="M_Inflation_Growth"))
+# rm(datMV, test); gc()
+
+
+# -- Function to convert NaN-values or infinite values within a vector to the given value 
+Treat_NaN <- function(vec, replaceVal=0) {
+  vec[is.nan(vec) | is.infinite(vec)] <- replaceVal
+  return (vec)
+}
+
+
+# -- Function for applying Winsorisation for dealing with outliers
+# All values above (and or below) a certain quantile(s) are assigned the value(s) of that specific quantile(s).
+# Input: [x]: A real valued vector
+# Output: A vector containing values betweem the specified lower and upper quantile of the input vector.
+winsorise <- function(x,lower_quant=0.025,upper_quant=0.975){
+  # --- Testing purposes
+  #x <- 1560*rbeta(10000, shape1=1, shape2=20); hist(x)
+  #lower_quant <- 0.05; upper_quant <- 0.90
+  # - Obtainnig the upper and lower quantiles of the distribution and creating indicator variables for applying the winsorisation
+  wins_ind_low <- as.numeric(x<quantile(x,lower_quant))
+  wins_ind_up <- as.numeric(x>quantile(x,upper_quant))
+  wins_ind_bet <- abs(wins_ind_low + wins_ind_up-1)
+  
+  # - Applying the winsorisation
+  z <- wins_ind_bet*x + wins_ind_low*quantile(x,lower_quant) + wins_ind_up*quantile(x,upper_quant)
+  
+  # - Returning the winsorised vector
+  return(z)
+  
+  #hist(z); rm(x,z,lower_quant,upper_quant,wins_ind_low,wins_ind_up,wins_ind_bet)
+}
+
+
+
+
+# -------- Interleaving & Interpolation functions
+
+# -- Coalescing function to facilitate data fusion between two given vectors
 # Input: two scalar values (x & y) that may have selective missingness in either side (left: x; right: y)
 # Output: Returns the non-missing side. If both are non-missing, then returns the (given) preference.
 interleave <- function(x,y, na.value = as.integer(NA), pref='X') {
@@ -58,9 +164,7 @@ interleave <- function(x,y, na.value = as.integer(NA), pref='X') {
 }
 
 
-# -------- Interpolation functions
-
-# - Missing value Treatment: Interpolate the values between two known non-missing points
+# -- Missing value Treatment: Interpolate the values between two known non-missing points
 # Assumes all missingness are 'encased' between two known points.
 # Input: [given]: a time series possibly with some missing values for which we like to interpolate;
 #     [shouldRollBackward]: If the first element is missing, should we try to fix this by 'back-interpolating'
@@ -207,13 +311,17 @@ interPol <- function(given, shouldRollForward=T, shouldRollBackward=T, SilenceWa
 }
 
 
+
+
+
 # -------- Scaling functions
 
-# - Four scaling functions to standardize given vectors unto a uniform scale
+# -- A few scaling functions to standardize given vectors unto a uniform scale
 # Input: [given]: a real-valued vector
 # Output: standardized vector
+### NOTE: the shifting parameter can be useful when the given vector contains excessive zero-values.
 
-# 1) Range-based scaler | vectors will have equal ranges (min-max); Note the shifting parameter which is useful when the given vector contains larger number of zero values and shifting is therefore unfavourable.
+# 1) Range-based scaler | vectors will have equal ranges (min-max); 
 scaler <- function(given, shift=TRUE){
   if (shift==T){
     output <- (given - min(given,na.rm=T)) / (max(given, na.rm=T) - min(given, na.rm=T))
@@ -238,9 +346,73 @@ scaler.norm <- function(given, shift=TRUE){
   return(output)
 }
 
+
+
+
+
 # -------- Transformation functions
 
-# --- Box-Cox transformation function
+# -- Yeo-Johnson transformation function
+# A function for applying Yeo-Johnson transformation to a given vector. The optimal transformation is selected based on either a normal log-likelihood
+# function of the transformed vector. The optimal transformation is thus chosen based on the best approximation to normality.
+# Input: [x]: a real-valued vector
+# Output:vector transformed with an optimal power transformation
+transform_yj <- function(x, bound_lower=-2, bound_upper=2, lambda_inc=0.5, verbose=FALSE, plotopt=FALSE, plotqq=FALSE, norm_test=FALSE, loss_func="loglik"){
+  # --- Unit test
+  # x <- 1560*rbeta(10000, shape1=1, shape2=20); hist(x)
+  # x <- rgamma(10000, shape=2, rate=5); hist(x) 
+  # bound_lower<--5; bound_upper<-5; lambda_inc<-0.5; verbose<-FALSE; plotopt<-TRUE; plotqq<-TRUE; norm_test=TRUE; loss_func<-"loglik"
+  
+  # - Preliminaries
+  require(MASS) # Ensure the requried pacakage in loaded of the Box-Cox function
+  lambda_search <- seq(from=bound_lower, to=bound_upper, by=lambda_inc) # Check if lambda_search exists and if not, assign a value: This parameter specifies the search space to obatin the optimal power transformation in th boxcox function
+  
+  # - Ensuring the plotting area is ready for possible plots 
+  par(mfcol=c(1,1))
+  
+  # - Selecting the optimal lambda1 parameter based on the choice of the loss function
+  lambda <- boxcox((x-min(x)+0.000001)~1,lambda=seq(from=bound_lower,to=bound_upper,by=lambda_inc), plotit=FALSE)
+  lambda_opt <- lambda$x[which.max(lambda$y)]
+  lambda_yj <- lambda_opt
+  
+  # - Applying the Yeo-Johnson transformation with the optimal lambda parameter
+  con1 <- as.integer(x>=0)*(lambda_yj!=0)
+  con2 <- as.integer(x>=0)*(lambda_yj==0) 
+  con3 <- as.integer(x<0)*(lambda_yj!=2)
+  con4 <- as.integer(x<0)*(lambda_yj==2)
+  
+  y <- ((con1*x+1)^lambda_yj-1)/(ifelse(lambda_yj!=0,lambda_yj,1)) + log(con2*x+1) - ((-con3*x+1)^(2-lambda_yj)-1)/(2-ifelse(lambda_yj!=2,lambda_yj,1)) - log(-con4*x+1)
+  
+  
+  # - Reporting the optimal lambda parameter, as well as the corresponding log-likelihood
+  cat('\nNOTE:\tThe optimal power-transformation is lambda1 = ', lambda_yj)
+  cat('\n \tThe optimal transformation has a log-likelihood =', round(max(lambda$y[which(lambda$x==lambda_yj)])), '\n')
+  
+  # - Plotting two qq-plots to show the normality of the given vector (x) before and after the optimal transformation 
+  if(plotqq==TRUE){
+    par(mfcol= c(1,2)); qqnorm(x); qqline(x, distribution = qnorm); qqnorm(y); qqline(y, distribution = qnorm);
+  }
+  
+  # - Conducting a KS test for normality
+  if(norm_test){
+    ks_test_x <- ks.test(x, "pnorm")$p.value
+    ks_test_y <- ks.test(y, "pnorm")$p.value
+    
+    cat('\nNOTE:\tThe KS-test for normality on the un-transformed data yields a p-value of ', ks_test_x)
+    cat('\n \tThe KS-test for normality on the transformed data yields a p-value of ', ks_test_y)
+  }
+  
+  # - Return the transformed vector
+  cat('\n \n')
+  return(y)
+  #rm(x,y,bound_lower,bound_upper, verbose, plotopt, plotqq, lambda1, lambda2, lambda_search, norm_test, loss_func)
+}
+# Some more testing conditions
+# transform_yj(x=1560*rbeta(10000, shape1=1, shape2=20), bound_lower=4, plotopt=TRUE)
+# transform_yj(x=1560*rbeta(10000, shape1=1, shape2=20),bound_lower=-2,bound_upper=2,lambda_inc=0.1, plotopt=TRUE, plotqq=TRUE, norm_test=TRUE)
+
+
+# -- Box-Cox transformation function
 # A function for applying Box-Cox transformation to a given vector. The optimal transformation is selected based on either a normal log-likelihood
 # function or the skewness of the transformed vector. The optimal transformation is thus chosen based on the best approximation to normality.
 # Input: [x]: a real-valued vector
@@ -322,136 +494,6 @@ transform_bc <- function(x, bound_lower=-2, bound_upper=2, lambda_inc=0.5 , anch
 #bc_transform(x=1560*rbeta(10000, shape1=1, shape2=20),bound_lower=-2,bound_upper=2,lambda_inc=0.1,  anchor1=FALSE, plotopt=TRUE, plotqq=TRUE, norm_test=TRUE)
 
 
-
-# --- Yeo-Johnson transformation function
-# A function for applying Yeo-Johnson transformation to a given vector. The optimal transformation is selected based on either a normal log-likelihood
-# function of the transformed vector. The optimal transformation is thus chosen based on the best approximation to normality.
-# Input: [x]: a real-valued vector
-# Output:vector transformed with an optimal power transformation
-transform_yj <- function(x, bound_lower=-2, bound_upper=2, lambda_inc=0.5, verbose=FALSE, plotopt=FALSE, plotqq=FALSE, norm_test=FALSE, loss_func="loglik"){
-  # --- Unit test
-  # x <- 1560*rbeta(10000, shape1=1, shape2=20); hist(x)
-  # x <- rgamma(10000, shape=2, rate=5); hist(x) 
-  # bound_lower<--5; bound_upper<-5; lambda_inc<-0.5; verbose<-FALSE; plotopt<-TRUE; plotqq<-TRUE; norm_test=TRUE; loss_func<-"loglik"
-  
-  # - Preliminaries
-  require(MASS) # Ensure the requried pacakage in loaded of the Box-Cox function
-  lambda_search <- seq(from=bound_lower, to=bound_upper, by=lambda_inc) # Check if lambda_search exists and if not, assign a value: This parameter specifies the search space to obatin the optimal power transformation in th boxcox function
-  
-  # - Ensuring the plotting area is ready for possible plots 
-  par(mfcol=c(1,1))
-  
-  # - Selecting the optimal lambda1 parameter based on the choice of the loss function
-  lambda <- boxcox((x-min(x)+0.000001)~1,lambda=seq(from=bound_lower,to=bound_upper,by=lambda_inc), plotit=FALSE)
-  lambda_opt <- lambda$x[which.max(lambda$y)]
-  lambda_yj <- lambda_opt
-  
-  # - Applying the Yeo-Johnson transformation with the optimal lambda parameter
-  con1 <- as.integer(x>=0)*(lambda_yj!=0)
-  con2 <- as.integer(x>=0)*(lambda_yj==0) 
-  con3 <- as.integer(x<0)*(lambda_yj!=2)
-  con4 <- as.integer(x<0)*(lambda_yj==2)
-  
-  y <- ((con1*x+1)^lambda_yj-1)/(ifelse(lambda_yj!=0,lambda_yj,1)) + log(con2*x+1) - ((-con3*x+1)^(2-lambda_yj)-1)/(2-ifelse(lambda_yj!=2,lambda_yj,1)) - log(-con4*x+1)
-  
-  
-  # - Reporting the optimal lambda parameter, as well as the corresponding log-likelihood
-  cat('\nNOTE:\tThe optimal power-transformation is lambda1 = ', lambda_yj)
-  cat('\n \tThe optimal transformation has a log-likelihood =', round(max(lambda$y[which(lambda$x==lambda_yj)])), '\n')
-  
-  # - Plotting two qq-plots to show the normality of the given vector (x) before and after the optimal transformation 
-  if(plotqq==TRUE){
-    par(mfcol= c(1,2)); qqnorm(x); qqline(x, distribution = qnorm); qqnorm(y); qqline(y, distribution = qnorm);
-  }
-  
-  # - Conducting a KS test for normality
-  if(norm_test){
-    ks_test_x <- ks.test(x, "pnorm")$p.value
-    ks_test_y <- ks.test(y, "pnorm")$p.value
-    
-    cat('\nNOTE:\tThe KS-test for normality on the un-transformed data yields a p-value of ', ks_test_x)
-    cat('\n \tThe KS-test for normality on the transformed data yields a p-value of ', ks_test_y)
-  }
-  
-  # - Return the transformed vector
-  cat('\n \n')
-  return(y)
-  #rm(x,y,bound_lower,bound_upper, verbose, plotopt, plotqq, lambda1, lambda2, lambda_search, norm_test, loss_func)
-}
-
-# Some more testing conditions
-# transform_yj(x=1560*rbeta(10000, shape1=1, shape2=20), bound_lower=4, plotopt=TRUE)
-# transform_yj(x=1560*rbeta(10000, shape1=1, shape2=20),bound_lower=-2,bound_upper=2,lambda_inc=0.1, plotopt=TRUE, plotqq=TRUE, norm_test=TRUE)
-
-
-
-# -------- Outlier handling functions
-
-# -- Function for applying Winsorisation for dealing with outliers
-# All values above (and or below) a certain quantile(s) are assigned the value(s) of that specific quantile(s).
-# Input: [x]: A real valued vector
-# Output: A vector containing values betweem the specified lower and upper quantile of the input vector.
-winsorise <- function(x,lower_quant=0.025,upper_quant=0.975){
-  # --- Testing purposes
-  #x <- 1560*rbeta(10000, shape1=1, shape2=20); hist(x)
-  #lower_quant <- 0.05; upper_quant <- 0.90
-  # - Obtainnig the upper and lower quantiles of the distribution and creating indicator variables for applying the winsorisation
-  wins_ind_low <- as.numeric(x<quantile(x,lower_quant))
-  wins_ind_up <- as.numeric(x>quantile(x,upper_quant))
-  wins_ind_bet <- abs(wins_ind_low + wins_ind_up-1)
-  
-  # - Applying the winsorisation
-  z <- wins_ind_bet*x + wins_ind_low*quantile(x,lower_quant) + wins_ind_up*quantile(x,upper_quant)
-  
-  # - Returning the winsorised vector
-  return(z)
-  
-  #hist(z); rm(x,z,lower_quant,upper_quant,wins_ind_low,wins_ind_up,wins_ind_bet)
-}
-
-# -------- Cleaning functions
-
-# -- Custom function that curates a main vector [x] to equal the previous/most-recent non-
-# missing element in a given vector
-imputeLastKnown <- function (x) {
-  # -- Testing purposes
-  # x <- Lookup$ZeroBal_Remain_Ind; x_lead <- Lookup$ZeroBal_Remain_Ind_lead
-  # x <- c(0,0,0,1,1,1,0,1)
-  # x <- c(0,0,0,1,1,1,0,NA)
-  # x <- c(0,0,0,1,1,1,1,NA)
-  # x <- c(0,0,0,1,NA,1,0,NA)
-  # x <- c(0,NA)
-  
-  firstOne <- which(is.na(x))[1]
-  if (!is.na(firstOne) & firstOne > 1) {
-    x[firstOne] <- x[firstOne-1]
-    # call function recursively to fix earlier missing-cases
-    return( imputeLastKnown(x))
-  } else { # no missing value found, return original vector
-    return(x)
-  }
-}
-
-# -- Custom function that curates a main vector [x] where x[1] is missing.
-# This is achieve by finding the first non-missing element and back-filling that value
-imputeFirstKnown <- function(x) {
-  # -- Testing purposes
-  # x <- c(NA, NA, 2,3,4)
-  firstOne <- which(!is.na(x))[1]
-  if (!is.na(firstOne) & firstOne > 1) {
-    x[1:(firstOne-1)] <- x[firstOne]
-    return(x)
-  } else { # no non-missing value found, return original vector
-    return(x)
-  }
-}
-
-# -- Function by which to adjust for inflation
-# Assumes a monthly macroeconomic dataset [macro_data_hist] to exist with [Date_T] and [Inflation] fields
-adjInflation <- function(g_start, g_stop) {
-  compFact <- macro_data_hist[Date_T >= g_start & Date_T <= g_stop, list(Factor = prod(1 + (Inflation/100)/12))]
-  return(compFact)
-}
 
 
 # -------- Performance measurement functions for fitted models

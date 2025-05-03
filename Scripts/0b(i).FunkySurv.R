@@ -1,15 +1,440 @@
 # ============================== SURVIVAL FUNCTIONS ==============================
-# Defining custom functions used across various projects
+# Defining bespoke customs relating to various generic aspects of survival analysis
 # --------------------------------------------------------------------------------
 # PROJECT TITLE: Default Survival Modelling
-# SCRIPT AUTHOR(S): Marcel Muller
-
-# VERSION: 1.0 (July-2023)
+# SCRIPT AUTHOR(S): Marcel Muller, Dr Arno Botha, Bernard Scheepers
+# VERSION: 2.0 (Apr-2025)
 # DESCRIPTION: 
 # This script defines various functions specific to survival modelling
 # that are used elsewhere in this project or, indeed, used across other projects.
 # Functions are grouped thematically.
 # ================================================================================
+
+
+
+
+# ----------------- 1. Functions related to the modelling process------------------
+
+
+
+# --- Function to add and/or remove certain values from a vector (Improves readability of code)
+# Input:  [mat]: (2 x n) Matrix on which changes will be made. The first column contains the variable names (vars) and the second their respective variable type (vartypes);
+#         [Remove]: Vector containing the entries to be removed.
+# Output:        [m], Updated matrix.
+vecChange <- function(mat,Remove=FALSE,Add=FALSE){
+  m <- mat
+  if (all(Remove != FALSE)) {m <- mat[!(mat$vars %in% Remove)]} # Remove values in [Remove]
+  if (all(Add != FALSE)) {m <- rbind(m,Add[!(Add$vars %in% mat$vars)])} # Add values in [Add]
+  return(m)
+}
+
+
+
+# --- Function to detect significant correlations (abs(cor) > 0.6) between vectors.
+# Input:  [data_train]: Training data; [variables]: List of variables used in correlation analysis;
+#         [corrThresh]: Absolute correlation threshold above which correlations are deemed significant;
+#         [method]: Correlation method.
+# Output: <graph>  Upper half of correlation matrix.
+#         <print> Text indicating the variable pairs with high correlation.
+corrAnalysis <- function(data_train, variables, corrThresh = 0.6, method = 'spearman') {
+  # Compute the correlation matrix
+  corrMat <- as.data.table(data_train) %>% subset(select = variables) %>% cor(method = method)
+  
+  # Visualize the correlation matrix
+  if(length(variables) <= 5){
+    corrplot(corrMat, type = 'upper', addCoef.col = 'black', tl.col = 'black', diag=FALSE,
+             tl.srt = 45, cl.pos="n")
+  }
+  
+  # Find correlation coordinates exceeding the threshold
+  corrCoordinates <- which(abs(corrMat) > corrThresh & abs(corrMat) < 1 & upper.tri(corrMat), arr.ind = TRUE)
+  
+  if(nrow(corrCoordinates) != 0){
+    # Create a data table with correlation pairs
+    corrProbs <- data.table(x = rownames(corrMat)[corrCoordinates[, 1]], y = colnames(corrMat)[corrCoordinates[, 2]])
+    
+    # Print the identified correlations
+    for (i in 1:nrow(corrProbs)) {
+      cat("Absolute correlations of ",percent(corrMat[corrProbs[i, x], corrProbs[i, y]]),
+          " found for ", corrProbs[i, x], " and ", corrProbs[i, y],"\n")
+    }
+  }else{
+    cat("No significant correlations were detected")
+  }
+}
+
+
+
+# --- Function to return the appropriate formula object based on the time definition.
+#         [TimeDef]: Time definition incorporated;
+#         [variables]: List of variables used to build single-factor models;
+TimeDef_Form <- function(TimeDef, variables, strataVar=""){
+  # Create formula based on time definition of the dataset.
+  if(TimeDef=="TFD"){# Formula for time to first default time definition (containing only the fist performance spell).
+    formula <- as.formula(paste0("Surv(Start,End,Default_Ind) ~ ",
+                                 paste(variables,collapse=" + ")))
+    
+  } else if(TimeDef=="AG"){# Formula for Andersen-Gill (AG) time definition
+    formula <- as.formula(paste0("Surv(Start,End,Default_Ind) ~ PerfSpell_Num + ",
+                                 paste(variables,collapse=" + ")))
+    
+  } else if(TimeDef=="PWPST"){# Formula for Prentice-Williams-Peterson (PWP) Spell time definition
+    formula <- as.formula(paste0("Surv(Start,End,Default_Ind) ~ strata(", strataVar, ") + ",
+                                 paste(variables,collapse=" + ")))
+  } else {stop("Unkown time definition")}
+  
+  return(formula)
+}
+
+
+
+# --- Function to fit a given formula within a Cox regression model towards extracting Akaike Information Criterion (AIC) and related quantities
+#         [formula]: Cox regression formula object; [data_train]: Training data;
+#         [data_valid]: Validation data; [variables]: List of variables used to build single-factor models;
+#         [it]: Number of variables being compared; [logPath], Optional path for log file for logging purposes;
+#         [fldSpellID]: Field name of spell-level ID.
+calc_AIC <- function(formula, data_train, variables="", it=NA, logPath="", fldSpellID="PerfSpell_Key") {
+  
+  tryCatch({
+    model <- coxph(formula,id=get(fldSpellID), data = data_train) # Fit Cox model
+    
+    if (!is.na(it)) {# Output the number of models built, where the log is stored in a text file afterwards.
+      cat(paste0("\n\t ", it,") Single-factor survival model built. "),
+          file=paste0(logPath,"AIC_log.txt"), append=T)
+    }
+    
+    AIC <- AIC(model) # Calculate AIC of the model.
+    
+    # Return results as a data.table
+    return(data.table(Variable = variables, AIC = AIC, pValue=summary(model)$coefficients[5]))
+    
+  }, error=function(e) {
+    AIC <- Inf
+    if (!is.na(it)) {
+      cat(paste0("\n\t ", it,") Single-factor survival model failed. "),
+          file=paste0(logPath,"AIC_log.txt"), append=T)
+    }
+    return(data.table(Variable = variables, AIC = AIC, pValue=NA)) 
+  })
+}
+
+
+
+# --- Function to extract the Akaike Information Criterion (AIC) from single-factor models
+# Input:  [data_train]: Training data; [data_valid]: [variables]: List of variables used to build single-factor models;
+#         [fldSpellID]: Field name of spell-level ID; [TimeDef]: Time definition incorporated.
+#         [numThreads]: Number of threads used; [genPath]: Optional path for log file. 
+# Output: [matResults]: Result matrix.
+aicTable <- function(data_train, variables, fldSpellID="PerfSpell_Key",
+                      TimeDef, numThreads=6, genPath, strataVar="") {
+  # - Testing conditions
+   # data_train <- datCredit_train_PWPST; TimeDef="PWPST"; numThreads=6
+   # fldSpellID<-"PerfSpell_Key"; variables<-"g0_Delinq_SD_4";
+  
+  # - Iterate across loan space using a multi-threaded setup
+  ptm <- proc.time() #IGNORE: for computation time calculation
+  cl.port <- makeCluster(round(numThreads)); registerDoParallel(cl.port) # multi-threading setup
+  cat("New Job: Estimating AIC for each variable as a single-factor survival model ..",
+      file=paste0(genPath,"AIC_log.txt"), append=F)
+  
+  results <- foreach(j=1:length(variables), .combine='rbind', .verbose=F, .inorder=T,
+                     .packages=c('data.table', 'survival'), .export=c('calc_AIC', 'TimeDef_Form')) %dopar%
+    { # ----------------- Start of Inner Loop -----------------
+      # - Testing conditions
+      # j <- 1
+      calc_AIC(formula=TimeDef_Form(TimeDef,variables[j], strataVar=strataVar), variables=variables[j],
+                    data_train=data_train, it=j, logPath=genPath,  fldSpellID=fldSpellID)
+      } # ----------------- End of Inner Loop -----------------
+  stopCluster(cl.port); proc.time() - ptm  
+  
+  # Sort by concordance in ascending order.
+  setorder(results, AIC)
+  
+  # Return resulting table.
+  return(results)
+}
+
+
+
+# --- Function to fit a given formula within a Cox regression model towards extracting Harrell's C-statistic and related quantities
+#         [formula]: Cox regression formula object; [data_train]: Training data;
+#         [data_valid]: Validation data; [variables]: List of variables used to build single-factor models;
+#         [it]: Number of variables being compared; [logPath], Optional path for log file for logging purposes;
+#         [fldSpellID]: Field name of spell-level ID.
+calc_HarrellC <- function(formula, data_train, data_valid, variables="", it=NA, logPath="", fldSpellID="PerfSpell_Key") {
+  # formula <- TimeDef_Form(TimeDef,variables[j], strataVar=strataVar)
+  
+  tryCatch({
+    model <- coxph(formula,id=get(fldSpellID), data = data_train) # Fit Cox model
+    
+    if (!is.na(it)) {# Output the number of models built, where the log is stored in a text file afterwards.
+      cat(paste0("\n\t ", it,") Single-factor survival model built. "),
+          file=paste0(logPath,"HarrelsC_log.txt"), append=T)
+    }
+    
+    c <- concordance(model, newdata=data_valid) # Calculate concordance of the model based on the validation set.
+    conc <- as.numeric(c[1])# Extract concordance
+    sd <- sqrt(c$var)# Extract concordance variability as a standard deviation
+    lr_stat <- round(2 * (model$loglik[2] - model$loglik[1]),0)# Extract LRT from the model's log-likelihood
+    
+    # Return results as a data.table
+    return(data.table(Variable = variables, Concordance = conc, SD = sd, LR_Statistic = lr_stat))
+  }, error=function(e) {
+    conc <- 0
+    sd <- NA
+    lr_stat <- NA
+    if (!is.na(it)) {
+      cat(paste0("\n\t ", it,") Single-factor survival model failed. "),
+          file=paste0(logPath,"HarrelsC_log.txt"), append=T)
+    }
+    return(data.table(Variable = variables, Concordance = conc, SD = sd, LR_Statistic = lr_stat)) 
+  })
+}
+
+
+
+# --- Function to extract the concordances (Harrell's C) from single-factor models
+# Input:  [data_train]: Training data; [data_valid]: Validation data;
+#         [variables]: List of variables used to build single-factor models;
+#         [fldSpellID]: Field name of spell-level ID; [TimeDef]: Time definition incorporated.
+# Output: [matResults]: Result matrix.
+concTable <- function(data_train, data_valid, variables, fldSpellID="PerfSpell_Key",
+                      TimeDef, numThreads=6, genPath, strataVar="") {
+  # - Testing conditions
+  # data_valid <- datCredit_train_PWPST; TimeDef="PWPST"; numThreads=6
+  # fldEventInd<-"Default_Ind"
+  
+  # - Iterate across loan space using a multi-threaded setup
+  ptm <- proc.time() #IGNORE: for computation time calculation
+  cl.port <- makeCluster(round(numThreads)); registerDoParallel(cl.port) # multi-threading setup
+  cat("New Job: Estimating B-statistic (1-KS) for each variable as a single-factor survival model ..",
+      file=paste0(genPath,"HarrelsC_log.txt"), append=F)
+  
+  results <- foreach(j=1:length(variables), .combine='rbind', .verbose=F, .inorder=T,
+                                 .packages=c('data.table', 'survival'), .export=c('calc_HarrellC', 'TimeDef_Form')) %dopar%
+    { # ----------------- Start of Inner Loop -----------------
+      # - Testing conditions
+      # j <- 1
+      calc_HarrellC(formula=TimeDef_Form(TimeDef,variables[j], strataVar=strataVar), variable=variables[j],
+                    data_train=data_train, data_valid=data_valid, it=j, logPath=genPath,  fldSpellID=fldSpellID)
+    } # ----------------- End of Inner Loop -----------------
+  stopCluster(cl.port); proc.time() - ptm  
+  
+  # Sort by concordance in descending order.
+  setorder(results, -Concordance)
+  
+  # Return resulting table.
+  return(results)
+}
+
+
+
+# --- Function to calcualte the complement of the KS test statistic "B-statistic"
+# Inputs: [formula]: Cox regression formula object; [data_train]: Training data;
+#         [fldSpellID]: Field name of spell-level ID; [vEvents]: spell-level vector of event indicators
+#         [seedVal]: Seed value for random number generation; [it]: optional iteration parameter for logging purposes;
+#         [logPath]: Optional path for log file for logging purposes.
+# Outputs: b-statistic (single value)
+calcBStat <- function(formula, data_train, fldSpellID="PerfSpell_Key", vEvents, seedVal, it=NA, logPath=NA) {
+  # - Testing conditions
+  # formula <- TimeDef_Form(TimeDef,variables[j], strataVar=strataVar)
+  
+  # Fit Model
+  tryCatch({
+    model <- coxph(formula, data = data_train, id=get(fldSpellID)) 
+    
+    if (!is.na(it)) {
+      cat(paste0("\n\t ", it,") Single-factor survival model built. "),
+          file=paste0(logPath,"BStat_log.txt"), append=T)
+    }
+    
+    # Calculate Cox-Snell (adjusted) residuals
+    vCS <- calc_CoxSnell_Adj(model, vIDs=data_train[[fldSpellID]], vEvents=vEvents)
+    # Initialize a unit exponential distribution
+    set.seed(seedVal, kind = "Mersenne-Twister")
+    vExp <- rexp(length(vCS),1)
+    # Perform the two-sample Kolmogorov-Smirnov test of distribution equality
+    #   H_0: vCS and vExp originates from the same distribution
+    #   NOTE: We only desire the KS test statistic in measuring distributional dissimilarity
+    #   Then, we subtract this from 1 in creating a coherent statistic; greater is better
+    bStat <- 1 - round(suppressWarnings(ks.test(vCS,vExp))$statistic,4)
+    return(bStat)
+    
+  }, error=function(e) {
+    bStat <- 0
+    if (!is.na(it)) {
+      cat(paste0("\n\t ", it,") Single-factor survival model failed. "),
+          file=paste0(logPath,"BStat_log.txt"), append=T)
+    }
+    return(bStat) 
+  })
+}
+
+
+
+# --- Function to extract the B-statistic from a range of models built on a list of variables based on a time definition.
+# Input:  [data_train]: Training data; [seedVal]: Seed value for random number generation;
+#         [numIt]: Number of iterations; [TimeDef], Time definition incorporated.
+#         [fldSpellID]: Field name of spell-level ID; [fldLstRowInd]: Indicates the end of a performance spell;
+#         [fldEventInd]: Indicates whether the target event occured; [numThreads]: Number of threads;
+#         [genPath]: Optional path for log file.
+# Output: [Results]:  Results table.
+csTable <- function(data_train, variables, TimeDef, seedVal=1, numIt=5, 
+                    fldSpellID="PerfSpell_Key", fldLstRowInd="PerfSpell_Exit_Ind", fldEventInd="Default_Ind",
+                    numThreads=6, genPath=NA, strataVar=""){
+  
+  # - Testing conditions
+  # data_train <- datCredit_train_PWPST; variables<-vars2; TimeDef<-"PWPST"; seedVal<-1; numIt<-5; 
+  # fldLstRowInd="PerfSpell_Exit_Ind";  fldSpellID="PerfSpell_Key"; fldEventInd="Default_Ind"; numThreads=6
+  
+  # - Initialize results
+  results <- data.frame(Variable = variables, B_Statistic = NA_real_)
+  
+  # - Data preparation
+  # Subset last row per performing spell for Goodness-of-Fit (GoF) purposes
+  datLstRow <- copy(data_train[get(fldLstRowInd)==1,])
+  vLstRow_Events <- datLstRow[, get(fldEventInd)]
+  
+  # - Simulate null distribution if seedVal is not NA
+  if (!is.na(seedVal)) {
+    
+    
+    # - Iterate across loan space using a multi-threaded setup
+    ptm <- proc.time() #IGNORE: for computation time calculation
+    cl.port <- makeCluster(round(numThreads)); registerDoParallel(cl.port) # multi-threading setup
+    cat("New Job: Estimating B-statistic (1-KS) for each variable as a single-factor survival model ..",
+        file=paste0(genPath,"BStat_log.txt"), append=F)
+    
+    results$B_Statistic <- foreach(j=1:length(variables), .combine='rbind', .verbose=F, .inorder=T,
+                      .packages=c('data.table', 'survival'), .export=c('calc_CoxSnell_Adj', 'calcBStat', 'TimeDef_Form')) %dopar%
+      
+      { # ----------------- Start of Inner Loop -----------------
+        # - Testing conditions
+        # var <- variables[1]; j<-4
+        calcBStat(formula=TimeDef_Form(TimeDef,variables[j], strataVar=strataVar), data_train=data_train, fldSpellID=fldSpellID, vEvents=vLstRow_Events,
+                  seedVal=seedVal, it=j, logPath=genPath)
+        
+      } # ----------------- End of Inner Loop -----------------
+    stopCluster(cl.port); proc.time() - ptm
+    
+    # Sort results by B statistic in descending order
+    results <- results[order(-results$B_Statistic, na.last = TRUE), ]
+    
+    # Return results and range of B statistics
+    return(list(Results = results, Range = diff(range(results$B_Statistic, na.rm = TRUE))))
+    
+  } else {
+    # Perform iterative B calculation when seedVal is NA
+    # Initialize Results matrix to contain the number of interations
+    matResults <- matrix(NA, nrow = length(variables), ncol = numIt,
+                         dimnames = list(variables,
+                                         paste0("Iteration_", 1:numIt))) %>%
+                          as.data.table()
+    
+    # - Iterate across loan space using a multi-threaded setup
+    ptm <- proc.time() #IGNORE: for computation time calculation
+    cl.port <- makeCluster(round(numThreads)); registerDoParallel(cl.port) # multi-threading setup
+    cat("New Job: Estimating B-statistics (1-KS) ..",
+        file=paste0(genPath,"BStat_log.txt"), append=F)
+    
+    for (it in seq_len(numIt)) {
+      
+      cat(paste0("\n Estimating B-statistic (1-KS) for each variable as a single-factor survival model for iteration ", it, " .."),
+          file=paste0(genPath,"BStat_log.txt"), append=T)
+      
+      matResults[, it] <- foreach(j=1:length(variables), .combine='rbind', .verbose=F, .inorder=T,
+                                     .packages=c('data.table', 'survival'), .export=c('calc_CoxSnell_Adj', 'calcBStat', 'TimeDef_Form')) %dopar%
+        
+        { # ----------------- Start of Inner Loop -----------------
+          # - Testing conditions
+          # var <- variables[1]
+          calcBStat(formula=TimeDef_Form(TimeDef,variables[j], strataVar=strataVar), data_train=data_train, fldSpellID=fldSpellID, vEvents=vLstRow_Events,
+                    seedVal=seedVal*it, it=j, logPath=genPath)
+          
+        } # ----------------- End of Inner Loop -----------------
+    }
+    stopCluster(cl.port); proc.time() - ptm
+    
+    # Compute additional statistics for the results matrix
+    colRanges <- matResults[, lapply(.SD, function(x) diff(range(x, na.rm = TRUE)))] # Calculate the Range of B-statistic value for each iteration
+    matResults[, Average := rowMeans(.SD, na.rm = TRUE), .SDcols = patterns("^Iteration_")]# Calculate the average B-statistic for each variable
+    matResults[, Variable := variables] 
+    matResults <- matResults %>% relocate(Variable, .before=Iteration_1)
+    
+    #matResults <- cbind(Variables = c(variables,"Range"),matResults)# Add a column to the Results matrix to cross reference the variables with their respective B-statistics
+    setorder(matResults,-Average)# Arrange matrix according to average
+    
+    # Return matrix of B statistics
+    return(list(Results=matResults, IterationRanges=colRanges))
+  }
+}
+
+
+
+# --- Function to calculate various survival-related quantities for a given loan history
+# Input:    [datGiven]: given loan history; [coxGiven]: fitted cox PH model; [it]: current iteration index; 
+#           [numKeys]: total keys; [genPath]: Optional path for log file.
+# Output:   Survival probability, cumulative hazard, hazard, and event probability
+survQuants <- function(datGiven, coxGiven, it=1, numKeys, genPath="", timeVar="End", startVar="Start") {
+  # datGiven <- subset(datCredit_valid_TFD,PerfSpell_Key == vSpellKeys[j]); coxGiven <- cox_TFD
+  # it=1; numKeys <- numSpellKeys; timeVar="End"; startVar="Start"
+  
+  # - Add a row when scoring S(t), merely to facilitate estimation of f(t)
+  if (datGiven[,get(timeVar)][1] > 1) {
+    datAdd <- datGiven[1, ]
+    datAdd[, (startVar) := get(startVar) - 1]
+    datAdd[, (timeVar) := get(timeVar) - 1]
+    datGiven <- rbind(datAdd, datGiven)
+    addedRow <- T
+  } else addedRow <- F
+  
+  # - Compute individual survival curve from fitted Cox model
+  survFit_pred <- survfit(coxGiven, centered=F, newdata=datGiven, id=PerfSpell_Key)
+  
+  cat("\n\t", it, "of", numKeys, "| Estimation completed for spell key:", unique(datGiven$PerfSpell_Key),
+      file=paste0(genPath,"survQuants_log.txt"), append=T)
+  
+  # - Compile survival table
+  datSurv <- data.table(PerfSpell_Key = unique(datGiven$PerfSpell_Key), End=datGiven$End, # composite key
+                        CHaz=survFit_pred$cumhaz, #RiskSetSize=survFit_pred$n.risk,
+                        #NumEvents=survFit_pred$n.event, NumCensored=survFit_pred$n.censor,
+                        Survival=round(survFit_pred$surv,digits=15))
+  # plot(survFit_pred)
+  # plot(datSurv$Survival, type="b")
+  
+  # - Due to data irregularities, the survival probability can increase again over certain t,
+  # which breaks the axioms of probability since S(t) = 1 - F(t) and F(t) is monotonically increasing by definition
+  # Luckily, these cases seem isolated to the later parts of the spell life
+  # In these cases, force the S(t)-estimate to equal the previous
+  vecErrors <- which(diff(datSurv$Survival) > 0)
+  if (length(vecErrors) > 1) {
+    
+    while (looping==T) {
+      datSurv$Survival[vecErrors[1]+1] <- datSurv$Survival[vecErrors[1]]
+      # Testing end condition
+      vecErrors <- which(diff(datSurv$Survival) > 0)
+      if (length(vecErrors) > 1) {looping=T} else {looping=F}
+    }
+  }
+  # plot(datSurv$Survival, type="b")
+  
+  # - Approximate baseline hazard h_0(t) from cumulative baseline hazard H_0(t)
+  #datSurv[, Hazard := c(datSurv$CHaz[1], diff(datSurv$CHaz))]
+  datSurv[, Hazard := (shift(Survival,n=1,type="lag",fill=1) - Survival)/shift(Survival,n=1,type="lag",fill=1)]
+  datSurv[, EventProb := shift(Survival,n=1,type="lag",fill=1) * Hazard] # f(t|X) = S(t-1|X) . h(t|X)
+  
+  # - Remove added row (if added)
+  if (addedRow) {
+    datSurv <- datSurv[2:NROW(datSurv),]
+  }
+  
+  return(datSurv)
+}
+
+
+
+
+### AB: Given the work of Bernard, I'm no longer sure of the utility of the below.
 
 # --- function to compute the (unscaled) Schoenfeld residuals for a Cox PH model
 #   1) Schoenfeld residuals are computed for each specified variable in the training dataset
@@ -188,7 +613,7 @@ cph_schoen <- function(cph, var=NULL, dat_train, id, time, status, verbose=T, ma
   
   # Clean up
   suppressWarnings(rm(dat_train2, dat_temp, dat_temp2, dat_temp3, dat_temp4, var, var_type, var_name, col_names, g, g_name, k, levels, levels_n))
-  
+
   return(list(data = dat_return_wider, CorTest = cor_test, plots = gplots))
   
   # rm(dat_temp, dat_temp2, dat_return, id, var, time, status, max_time, verbose)
@@ -204,7 +629,8 @@ cph_schoen <- function(cph, var=NULL, dat_train, id, time, status, verbose=T, ma
 # cph_bres_scaled_schoenfeld <- residuals(cph, type="schoenfeld") # | Use residuals() for classical Schoenfeld residuals and not Scaled; Schoefeld residuals computed for each level
 
 # - Function Execution
-# return <- cph_schoen(cph=cph, id = "PerfSpell_Key", dat_train = dat_train, time = "TimeInPerfSpell", status = "DefaultStatus1", verbose = F, max_time = 240)
+# return <- cph_schoen(cph=cph, id = "PerfSpell_Key", dat_train = dat_train, time = "TimeInPerfSpell", 
+#             status = "DefaultStatus1", verbose = F, max_time = 240)
 
 # - Comparison of Schoenfeld residuals for a numerical variable
 # a <- cph_bres_scaled_schoenfeld[,1]
@@ -225,272 +651,3 @@ cph_schoen <- function(cph, var=NULL, dat_train, id, time, status, verbose=T, ma
 ### RESULTS:~ TRUE
 # - Plot comparison for categorical variable
 # par(mfcol=c(1,2)); plot(x=rownames(cph_bres_scaled_schoenfeld), y=cph_bres_scaled_schoenfeld[,8], xlim=c(0,240)); plot(x=return$data$Time, y=return$data$Sch_Res_slc_pmnt_method_Suspense, xlim=c(0,240))
-
-
-# --- function to return the time-dependent ROC curve and time-dependent AUC value (Incidence/ Dynamic) of a Cox survival model
-# Input:  dat_explain - The dataset containing the required variables for time-dependent ROC and AUC computation
-#         predict.time - Time point for valuation
-#         Input_Names - A vector containing the names in dat_explain
-#             First element is the name of the column containing the event time
-#             Second element is the name of the column containing the event indicator
-#          marker - A vector containing the predictions of the Cox Model on the records in dat_explain
-#             Third element is the name of the column containing the marker values (predictions); we work specifically with the linear prediction
-# Output: A list containing time-dependent marker values, TPs, FPs, and AUCs.
-risksetROC_helper <- function(dat_explain, Input_Names = c("TimeInPerfSpell", "DefaultStatus1"), marker = cph_lp, predict.time=12) {
-  risksetROC::risksetROC(Stime        = dat_explain[[Input_Names[1]]],  
-                         status       = dat_explain[[Input_Names[2]]],                 
-                         marker       = marker,                             
-                         entry        = dat_explain[[Input_Names[1]]]-1,                              
-                         predict.time = predict.time,
-                         method       = "Cox",
-                         plot = FALSE)
-}
-
-
-# --- function for computing various assessment measures for a given Cox Proportional Hazards model.
-#   1) A test can be conducted for proportional hazards and the Schoenfeld residuals for each covariate is plotted.
-#   2) The VIF can be computed for each covariate.
-#   3) An analysis of the reduction of deviance (ANOVA) by sequnetial addition of covariates to the model can be conducted and a visual aid provided.
-#   4) The time-depdendent ROC-curves can be plotted and the time-dependent AUC-values computed for various time-points.
-# Input: dat_train - The dataset used to train the Cox PH model
-#        dat_explain - The dataset with which the Cox PH model needs to be assessed.
-#        model - The Cox PH model to be assessed.
-#        input.l - list containing the relevant variable names in dat_train (& dat_explain) to enable the various assessments
-#             input.l <- list(Time of Observation Variable Name, Event Indicator Variable Name, c(Variable Name 1,..., Variable Name n))
-#        PH_assumption - Indicator for conducting the PH assumption test and displaying the Schoenfeld residuals (only if verbose  = FALSE).
-#        VIF - Indicator for computing the VIF of the covariates.
-#        anova_explain - Indicator for conducting an analysis of the reduction of the deviance of the model by sequential addition of variables and displaying the results (if verbos =FALSE)
-#        predict.time - Vector containg the desired times to compute the AUC values and plot the corresponding ROC curves (if verbose = FALSE)
-#        verbose - Indicator variable used to supress visual graphs created by some of the performance measures and analysis.
-# Output: List of the various test and analysis resutls, the elements of this list are as follows:
-#         Model_VIF - The VIF of each covariate
-#         Model_ANOVA - The results of a reducion in deviance analysis by the sequnetial addition of variables
-#         Model_AIC - The AIC of the fitted Cox PH model
-#         AUC - The corresponding time-dependent AUC values of the given prediction times
-#         PH_Test - Graphical- and statistical tests for proportional hazards of each of the given covariates (defaults to all covariates in the model). Also included is a dataset of the original values and the residuals.
-swiss_model <- function(dat_train, dat_explain, model, input.l = NULL, PH_assumption = TRUE, VIF = TRUE, anova_explain = FALSE, AUC_explain = FALSE, predict.time = 12, verbose = FALSE, max_time = NULL){
-  # dat_explain<-dat_valid; input.l<-list("PerfSpell_Key", "TimeInPerfSpell", "DefaultStatus1"); model<-cph; PH_assumption<-TRUE; VIF<-TRUE; anova_explain<-FALSE; AUC_explain<-TRUE; predict.time<- c(12); verbose<-FALSE; max_time<-240
-  # - Initialise the output vector
-  output <- NULL
-  
-  if (length(input.l) < 4){
-    input.l[[4]] <- as.vector(unlist(strsplit(toString(summary(model)$call$formula[[3]]), '[,+ ]+')))
-    input.l[[4]] <- input.l[[4]][input.l[[4]]!=""]
-  }
-  
-  # --- Model Assumptions
-  # - Multicollinearity
-  if (VIF){
-    Model_VIF <- vif(model)
-    output[["VIF"]] = Model_VIF
-  }
-  
-  # - Proportional Hazards Assumption
-  # Proportional Hazards Test
-  if (PH_assumption){
-    PH_Test <- cph_schoen(cph=model, dat_train = dat_train, var = input.l[[4]], id = input.l[[1]], time = input.l[[2]], status = input.l[[3]], verbose = F, max_time = max_time)
-    output[["PH_Test"]] <- PH_Test
-  }
-  
-  # --- Variable Importance Measures
-  # - ANOVA Analysis - Reduction in Deviance
-  # Conduct the ANOVA analysis, conditional on if it is required
-  if (anova_explain){
-    Model_ANOVA <- anova(model, test = 'chisq')
-    ANOVA <- list(anova = Model_ANOVA)
-    
-    # Create the ANOVA plot
-    if (!verbose){
-      # Getting the names of the relevant variables in the ANOVA object.
-      col_names <- input.l[[4]]
-      
-      # Creating a dataset from the ANOVA object for graphing.
-      datPlot <- data.frame(Variable_Name = col_names, ChiSq_Value = round(Model_ANOVA$Chisq[2:(length(col_names)+1)]), Var_Order = 1:length(col_names))
-      
-      # Creating a graph to visually present the contribution of each variable in the Cox model.
-      g_anova <- ggplot(datPlot, aes(x=reorder(Variable_Name, as.numeric(ChiSq_Value)), y=as.numeric(ChiSq_Value))) +
-        geom_col(col='blue', fill='blue') + 
-        theme_minimal() + theme(plot.title = element_text(hjust=0.5)) + coord_flip() +
-        labs(x="Variable", y="Reduction in Model's Deviance") +
-        geom_label(aes(label=Var_Order), position = position_stack(vjust=0.5))
-      
-      ANOVA[["plots"]] <- g_anova
-    }
-    
-    output[["anova"]] = ANOVA
-  }
-  
-  # --- Model Assessment
-  # - AIC Value
-  output[["AIC"]] <- extractAIC(model)[2]
-  
-  # - Time-dependent AUC Values and ROC Curves
-  if (AUC_explain){
-    # Computing the linear predictions for each recored in the given dataset and amending the dataset to include those predictions
-    cph_lp <- predict(model, dat_explain, type="lp") # linear predictions are used for assessment (X*Beta)
-    
-    # Creating a dataset containing the FPs and TPs and AUC values for each time in the vector
-    risksetROC_data <- data.frame(Predict_Time = NULL, AUC = NULL, FP = NULL, TP = NULL, Marker = NULL)
-    for (i in 1:length(predict.time)){
-      temp <- risksetROC_helper(dat_explain = dat_explain, Input_Names = (c(input.l[[2]], input.l[[3]])), marker = cph_lp, predict.time = predict.time[i])
-      risksetROC_data <- rbind(risksetROC_data, data.frame(Predict_Time = predict.time[i], AUC = temp$AUC, FP = temp$FP, TP = temp$TP))
-    }
-    rm(temp)
-    risksetROC_data <- risksetROC_data %>% arrange(Predict_Time, FP, TP) # Arranging the dataset according to the given vector of prediction times (and then by FPs and TPs)
-    
-    AUC <- list(data = data.table(predict_times = predict.time,
-                                  auc = unique(risksetROC_data$AUC)))
-    
-    # Plotting the ROC curves for the desired prediction times (if verbose = FALSE)
-    if (!verbose){
-      g_auc <- ggplot(data = risksetROC_data, mapping = aes(x = FP, y = TP)) +
-        geom_line(col = 'blue') +
-        geom_abline(col='red') +
-        geom_label(data = risksetROC_data %>% dplyr::select(Predict_Time,AUC) %>% unique,
-                   mapping = aes(label = sprintf("%.3f", AUC)), x = 0.5, y = 0.5) +
-        facet_wrap(vars(Predict_Time)) +
-        theme_bw() +
-        theme(axis.text.x = element_text(angle = 90, vjust = 0.5),
-              legend.key = element_blank(),
-              plot.title = element_text(hjust = 0.5),
-              strip.background = element_blank()) +
-        xlab("FP") + ggtitle('ROC Curve(s) for the given CPH Model')
-      
-      AUC[["plots"]] <- g_auc
-      output[["AUC"]] <- AUC
-    }
-  }
-  
-  return(output)
-  # rm(dat_explain, model, PH_assumption, VIF, anova_explain, AUC_explain, input.l, predict.time, verbose, risksetROC_data, datPlot, Model_VIF, PH_Test, output, temp)
-}
-
-# --- Unit Test
-# swiss_cph <- swiss_model(dat_train = dat_train, dat_explain = dat_valid, model = cph, input.l = list("PerfSpell_Key", "TimeInPerfSpell", "DefaultStatus1"), PH_assumption = T, VIF = T, anova_explain = F, AUC_explain = T, predict.time = 12, verbose = F, max_time = 240)  
-
-
-
-
-# --- function for identifying FALSE default spells in a given dataset
-# Input: dat_given - The dataset in which false default spells should be identified
-#        LoanID - Name of the account ID
-#        PerfSpellID - Name of the performance spell ID of an account
-#        DefSpellID - Name of the default spell ID of an account
-#        Counter - Name of the counter variable (counts the observation of a account)
-#        PerfSpell_Counter - Name of the counter variable for an assocaited performance spell
-#        DefSpell_Counter - Name of the counter variable for an assocaited default spell
-#        DefSpellResol_Type_Hist - Name of variable indicating how the default spell was resolved
-#        PerfSpell_Max_Date - Name of variable indicating the last observed date of the assocaited performance spell (optional)
-#        DefSpell_Max_Date - Name of variable indicating the last observed date of the assocaited performance spell (optional)
-# Output: dat_given - The dataset conatining the variable identifying FALSE default spells
-False_Perf_Def <- function(dat_given, LoanID=NA, Date=NA, PerfSpellID=NA, DefSpellID=NA, Counter=NA, PerfSpell_Counter=NA, DefSpell_Counter=NA,
-                           PerfSpell_Max_Date=NA, DefSpell_Max_Date=NA){
-  # --- Unit test parameters:
-  # dat_given <- copy(datCredit_smp); LoanID <- "LoanID"; Date <- "Date"; PerfSpellID <- "PerfSpell_Key"; DefSpellID <- "DefSpell_Key"
-  # Counter <- "Counter"; PerfSpell_Counter <- "PerfSpell_Counter"; DefSpell_Counter <- "DefSpell_Counter"; DefSpell_Max_Date <- "DefSpell_Max_Date"; PerfSpell_Max_Date <- "PerfSpell_Max_Date"
-  
-  # --- Arranging the dataset according to the LoanID and Date
-  dat_given <- arrange(dat_given, get(deparse(substitute(LoanID))), get(deparse(substitute(Date)))) %>% setDT(key=c(get(deparse(substitute(LoanID))), get(deparse(substitute(Date)))))
-  
-  # --- Creating a subset containing only the required column names
-  colnames <- c(LoanID, Date, PerfSpellID, DefSpellID, Counter, PerfSpell_Counter, DefSpell_Counter,
-                ifelse(!is.na(DefSpell_Max_Date), DefSpell_Max_Date, NA), ifelse(!is.na(PerfSpell_Max_Date), PerfSpell_Max_Date, NA))
-  dat_sub <- subset(dat_given, select=colnames[!is.na(colnames)])
-  
-  # --- Renaming the columns to enable easier coding
-  colnames_new <- c("LoanID", "Date", "PerfSpellID", "DefSpellID", "Counter", "PerfSpell_Counter", "DefSpell_Counter",
-                    ifelse(!is.na(DefSpell_Max_Date), "DefSpell_Max_Date", NA), ifelse(!is.na(PerfSpell_Max_Date), "PerfSpell_Max_Date", NA))
-  colnames(dat_sub) <- colnames_new[!is.na(colnames_new)]
-  
-  # --- Creating a variable showing the previous/ next counter value
-  dat_sub[, Counter_Prev := as.numeric(shift(x=Counter, n=1, type="lag")), by=LoanID] # Creating a temporary variable for checking if the next observation of the account is in the dataset (exists)
-  dat_sub[, Counter_Next := as.numeric(shift(x=Counter, n=1, type="lead")), by=LoanID] # Creating a temporary variable for checking if the next observation of the account is in the dataset (exists)
-  
-  # --- Creating variables for indicating whether the previous/ next record of an account exists
-  dat_sub[, Prev_Exist := Counter_Prev==Counter-1]
-  dat_sub[is.na(Prev_Exist), Prev_Exist := F] # Checking whether this variable is missing (should then be FALSE)
-  
-  dat_sub[, Next_Exist := Counter_Next==Counter+1]
-  dat_sub[is.na(Next_Exist), Next_Exist := F] # Checking whether this variable is missing (should then be FALSE)
-  
-  # --- Creating a variable for identifying whether a performance/ default spell should be included in an subsequent analysis
-  dat_sub[!is.na(DefSpellID) & !(is.na(PerfSpellID)) & Prev_Exist==F, PerfSpell_F := T] # Identifying all instances where a loan is in default (and performance) and the previous observation doesn't exist
-  dat_sub[!is.na(DefSpellID) & !is.na(PerfSpellID) & Next_Exist==F, DefSpell_F := T] # Identifying all instances where a loan is in default (and performance) and the next observation doesn't exist
-  
-  # - Amending the variables for identifying FALSE performance/ default spells
-  dat_sub[is.na(PerfSpell_F), PerfSpell_F := F] # Correcting for all other instances of performance spells (since the FALSE ones have already been identified)
-  dat_sub[is.na(DefSpell_F), DefSpell_F := F]
-  
-  # - Amending the default variable for single observation default spells
-  dat_sub[DefSpell_Counter==1 & Date==DefSpell_Max_Date & Prev_Exist==T, DefSpell_F := F] #  Because of the overlap, this one observation will be in both the training and validation dataset. This ensures that only one of the observations is chosen to take into account.
-  
-  # --- Subsetting dat_sub to only include the required variables (that which is to be returned)
-  dat_sub <- subset(dat_sub, select=c("LoanID", "Date", "PerfSpell_F", "DefSpell_F")) %>% setDT(key=c("LoanID", "Date"))
-  
-  # --- Adding the false performance- and default variables to the given dataset
-  dat_given <- cbind(dat_given, dat_sub[, list(PerfSpell_F, DefSpell_F)])
-  
-  # --- Amending the dataset so that FALSE performance- and default spells do not have an associated spell key, counter, and max date (enables easier subsettin)
-  dat_given[PerfSpell_F==T, c((PerfSpellID), (PerfSpell_Counter), (PerfSpell_Max_Date)) := lapply(.SD, function(x) {x=NA}), .SDcols = c((PerfSpellID), (PerfSpell_Counter), (PerfSpell_Max_Date))]
-  dat_given[DefSpell_F==T, c((DefSpellID), (DefSpell_Counter), (DefSpell_Max_Date)) := lapply(.SD, function(x) {x=NA}), .SDcols = c((DefSpellID), (DefSpell_Counter), (DefSpell_Max_Date))]
-
-  # --- Returning the dataset
-  return(dat_given)
-
-}
-
-# --- Checks
-# dat_train1 <- False_Pef_Def(dat_train1, LoanID="LoanID", Date="Date", PerfSpellID="PerfSpell_Key", DefSpellID="DefSpell_Key",
-#                             Counter="Counter", PerfSpell_Counter="PerfSpell_Counter", DefSpell_Counter="DefSpell_Counter",
-#                             DefSpell_Max_Date="DefSpell_Max_Date", PerfSpell_Max_Date="PerfSpell_Max_Date", DefSpellResol_Type_Hist="DefSpellResol_Type_Hist")
-# dat_valid1 <- False_Pef_Def(dat_valid1, LoanID="LoanID", Date="Date", PerfSpellID="PerfSpell_Key", DefSpellID="DefSpell_Key",
-#                             Counter="Counter", PerfSpell_Counter="PerfSpell_Counter", DefSpell_Counter="DefSpell_Counter",
-#                             DefSpell_Max_Date="DefSpell_Max_Date", PerfSpell_Max_Date="PerfSpell_Max_Date", DefSpellResol_Type_Hist="DefSpellResol_Type_Hist")
-# 
-# lookup_IDs <- unique(datCredit_real[PerfSpell_Num>=5, LoanID])
-# 
-# lookup <- datCredit_real[LoanID=="3000002499333", ]
-# lookup_t <- dat_train1[LoanID=="3000002499333", ]
-# lookup_v <- dat_valid1[LoanID=="3000002499333", ]
-# lookup_sub <- dat_sub[LoanID==lookup_IDs[200], ]
-# 
-# # - Overlaps
-# overlaps <- which(dat_train2[DefSpell_Counter==1 & DefSpell_F==F, DefSpell_Key] %in% dat_valid2[DefSpell_Counter==1 & DefSpell_F==F, DefSpell_Key])
-# 
-# lookup_IDs <- str_sub(dat_train2[DefSpell_Counter==1 & DefSpell_F==F, DefSpell_Key][overlaps], start=1, end=-3)
-# 
-# lookup <- datCredit_real[LoanID==lookup_IDs[10], ]
-# lookup_t <- dat_train2[LoanID==lookup_IDs[10], ]
-# lookup_v <- dat_valid2[LoanID==lookup_IDs[10], ]
-
-
-# --- Checks
-# dat_train1 <- False_Pef_Def(dat_train1, LoanID="LoanID", Date="Date", PerfSpellID="PerfSpell_Key", DefSpellID="DefSpell_Key",
-#                             Counter="Counter", PerfSpell_Counter="PerfSpell_Counter", DefSpell_Counter="DefSpell_Counter",
-#                             DefSpell_Max_Date="DefSpell_Max_Date", PerfSpell_Max_Date="PerfSpell_Max_Date", DefSpellResol_Type_Hist="DefSpellResol_Type_Hist")
-# dat_valid1 <- False_Pef_Def(dat_valid1, LoanID="LoanID", Date="Date", PerfSpellID="PerfSpell_Key", DefSpellID="DefSpell_Key",
-#                             Counter="Counter", PerfSpell_Counter="PerfSpell_Counter", DefSpell_Counter="DefSpell_Counter",
-#                             DefSpell_Max_Date="DefSpell_Max_Date", PerfSpell_Max_Date="PerfSpell_Max_Date", DefSpellResol_Type_Hist="DefSpellResol_Type_Hist")
-# 
-# lookup_IDs <- unique(datCredit_real[PerfSpell_Num>=5, LoanID])
-# 
-# lookup <- datCredit_real[LoanID=="3000002499333", ]
-# lookup_t <- dat_train1[LoanID=="3000002499333", ]
-# lookup_v <- dat_valid1[LoanID=="3000002499333", ]
-# lookup_sub <- dat_sub[LoanID==lookup_IDs[200], ]
-# 
-# # - Performance spells
-# # The start of default spells overlaps with the end of performance spells. When sub-setting for performance spells, those overlaps are including (although the entire performance spell is not included, only the last observation).
-# # Need to identify the observations with no further performance spell history as they are false.
-# 
-#
-# # - Overlaps
-# overlaps <- which(dat_train2[DefSpell_Counter==1 & DefSpell_F==F, DefSpell_Key] %in% dat_valid2[DefSpell_Counter==1 & DefSpell_F==F, DefSpell_Key])
-# 
-# lookup_IDs <- str_sub(dat_train2[DefSpell_Counter==1 & DefSpell_F==F, DefSpell_Key][overlaps], start=1, end=-3)
-# 
-# lookup <- datCredit_real[LoanID==lookup_IDs[10], ]
-# lookup_t <- dat_train2[LoanID==lookup_IDs[10], ]
-# lookup_v <- dat_valid2[LoanID==lookup_IDs[10], ]
-
-

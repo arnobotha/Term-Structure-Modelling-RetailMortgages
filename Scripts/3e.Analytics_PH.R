@@ -9,6 +9,8 @@
 #   - 4a.Data_Partition
 # --------------------------------------------------------------------------------------------------
 
+### AB [2025-04-22]: Salvage
+
 # ------ 1. Preliminaries
 # - Loading in required dataset
 if (!exists('datCredit_real')) {  unpack.ffdf(paste0(genPath,"creditdata_analytics"), tempPath)}
@@ -143,7 +145,7 @@ chosenFont <- "Cambria"
 dpi <- 360
 
 # - [Principal]
-g_Sch_Res_Principal <- ggplot(ass_cph_Default_PH_test_data[, list(Time, Sch_Res_Principal_wins)], aes(x=Time, y=Sch_Res_Principal_wins)) +
+g_Sch_Res_Principal <- ggplot(ass_cph_Default_PH_test_data[, list(Time, Sch_Res_Principal)], aes(x=Time, y=Sch_Res_Principal)) +
                        theme_minimal() + xlab(expression(Default~Time~italic(tau[d]))) + ylab(expression(italic(hat(Sc)(x[k~i~tau[d]])))) +
                        theme(text=element_text(family=chosenFont),legend.position = "bottom") +
                        geom_point(shape=1, col="#3F702F") + geom_smooth(aes(linetype="solid"), col="#043927", fill="#043927") +

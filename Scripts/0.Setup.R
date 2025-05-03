@@ -2,7 +2,7 @@
 # Setting up R environment, parameters, and function definitions
 # ---------------------------------------------------------------------------------------
 # PROJECT TITLE: Default survival modelling
-# SCRIPT AUTHOR(S): Dr Arno Botha, Roelinde Bester, Marcel Muller, Roland Breedt
+# SCRIPT AUTHOR(S): Dr Arno Botha (AB), Marcel Muller (MM)
 
 # DESCRIPTION: 
 # This script installs and loads various libraries and packages, compiles all
@@ -51,10 +51,9 @@ require(car)
 require(survivalROC) # for time-dependent ROC-analysis from Heagerty et al.
 #require(survAUC) # for time-dependent ROC-analysis (alternative from Potapov et al.)
 #require(tdROC) # for time-dependent ROC-analysis ([outdated?] alternative from Li et al.)
-#require(timeROC) # for time-dependent ROC-analysis ([outdated?] alternative from Blanche)
-require(risksetROC) # for time-dependent ROC-analysis (I/D Cox regression method from Heagerty, P.J., Zheng Y. (2005))
+#require(timeROC) # for time-dependent ROC-analysis from Blanche2013 (disavowed in script 0b(iii)). DO NOT USE IN CREDIT DOMAIN
+#require(risksetROC) # for time-dependent ROC-analysis (I/D Cox regression method from Heagerty, P.J., Zheng Y. (2005))
 require(pROC); require(ROCR) # both for cross-sectional ROC-analysis (main:pROC)
-require(discSurv)
 require(MASS)
 
 #for plots
@@ -67,7 +66,7 @@ require(extrafont) #remotes::install_version("Rttf2pt1", version = "1.3.8"); Sys
 require(survminer)
 require(gridExtra)
 require(corrplot)
-require(Metrics)
+#require(Metrics)
 
 
 
@@ -87,9 +86,9 @@ k <- 6 # Probation period
 Username <- Sys.getenv("USERNAME")
 
 # - Setting the paths conditional on the current active user
-if (Username == "Arno Botha"){ # Dr Arno Botha | Kralkatorrik-machine
+if (Username %in% c("Arno Botha", "arnos")) { # Dr Arno Botha | Kralkatorrik-machine
   # - Common path for saving large R-objects as back-up and/or as reusable checkpoints
-  genPath <- "E:/DataDump/RetailMortgages-FNB/Term-Structure-Modelling-RetailMortgages/"
+  genPath <- "E:/DataDump/RetailMortgages-FNB/Term-Structure-Modelling-RetailMortgages_Data/"
   # - Common path from which raw big datasets are imported
   genRawPath <- "E:/DataDump/RetailMortgages-FNB/"
   # - Common path for sourcing R-scripts in main codebase
@@ -140,4 +139,10 @@ source(paste0(path_cust,'DelinqM.R'))
 
 # - Survival functions
 source(paste0(path_cust,'0b(i).FunkySurv.R'))
+
+# - Custom survival-related functions - Residuals (Cox-Snell, Schoenfeld)
+source(paste0(path_cust,'0b(ii).FunkySurv_Residuals.R'))
+
+# - Custom survival-related functions - time-dependent ROC-analyses and unit tests
+source(paste0(path_cust,'0b(iii).FunkySurv_tROCkit.R'))
 

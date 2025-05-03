@@ -2,7 +2,7 @@
 # Import credit data and macroeconomic data
 # ---------------------------------------------------------------------------------------
 # PROJECT TITLE: Default survival modelling
-# SCRIPT AUTHOR(S): Dr Arno Botha, Roelinde Bester
+# SCRIPT AUTHOR(S): Dr Arno Botha (AB)
 
 # DESCRIPTION:
 # This script imports the loan performance credit dataset (SAS) into R, as well
@@ -12,7 +12,7 @@
 #   - 0.Setup.R
 
 # -- Inputs:
-#   - creditdata_final.sas7bdat | monthly loan performance credit data (FNB Mortgages) (subject-period format)
+#   - creditdata_final_sub | monthly loan performance credit data (FNB Mortgages) (subject-period format)
 #   - macro_data_monthly.sas7bdat | monthly macroeconomic data
 #   - macro_data_quarterly.sas7bdat | quarterly macroeconomic data
 #   - creditdata_input.sas7bdat | input fields associated with credit data (FNB Mortgages)
