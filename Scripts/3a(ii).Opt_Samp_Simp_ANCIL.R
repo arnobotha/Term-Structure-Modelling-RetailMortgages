@@ -149,6 +149,7 @@ subSmp_strat <- function(smp_size, smp_frac, seed=123, prior_prop=NA, eventRate_
   # --- UNIT TEST
   # datGiven <- copy(datCredit); smp_size <- 90000; targetVar <- "resolType"
   # seed <- 1; minStrata_size <- 0; EventRate <- T; sDateMax_Adj=-1
+  ptm <- proc.time()
   
   # --- Preliminaries
   # - Implied sampling fraction for downsampling step
@@ -272,10 +273,14 @@ subSmp_strat <- function(smp_size, smp_frac, seed=123, prior_prop=NA, eventRate_
     err_eventRate_MAE_valid <- mean(abs(datMrgd_Valid$EventRate - datMrgd_Valid$EventRate_Samp), na.rm=T) # mean absolute error
     err_eventRate_MAE_trainvalid <- mean(abs(datMrgd_TrainValid$EventRate - datMrgd_TrainValid$EventRate_Samp), na.rm=T) # mean absolute error
     
+    # record elapsed time
+    tme <- (proc.time() - ptm)
+    
     # - Append error value to output table
     datTemp <- data.table(datTemp, "Err_EventRate_PopTrain_MAE" = err_eventRate_MAE_train, 
                           "Err_EventRate_PopValid_MAE" = err_eventRate_MAE_valid,
-                          "Err_EventRate_TrainValid_MAE" = err_eventRate_MAE_trainvalid)
+                          "Err_EventRate_TrainValid_MAE" = err_eventRate_MAE_trainvalid,
+                          "ElapsedTime"=tme[3])
   }
   
   
@@ -302,7 +307,7 @@ cl.port <- makeCluster(cpu.threads-1)
 registerDoParallel(cl.port)
 
 cat(paste0("1 (", Sys.time(),"). Iterating across subsample sizes ..."),
-    file="subsampleLoop", append=T)
+    file="subsampleLoop.txt", append=F)
 
 ptm <- proc.time() #IGNORE: for computation time calculation
 
@@ -410,8 +415,8 @@ datEventRate_TrainValid_1st <- datGraph[order(SubSample_Size), list(Gradient = d
 # plot(diff(datEventRate_PopTrain_1st), type="b", main="2nd derivative") # 2nd derivative neither smooth nor monotonic
 # plot(diff(datEventRate_TrainValid_1st), type="b", main="2nd derivative") # 2nd derivative is smooth but not monotonic
 # - Find index of stationary points x such that f''(x) <= epislon
-statPoint_PopTrain <- which(abs(diff(datEventRate_PopTrain_1st)) < 10^(-10.25))[1] # Matter investigated; there is "jaggedness" in the plot of the second derivative, and that is why we take the second point
-statPoint_TrainValid <- which(abs(diff(datEventRate_TrainValid_1st)) < 10^(-10.5))[1] # 2nd derivative is neither smooth nor monotonic
+statPoint_PopTrain <- 18 # Matter investigated; there is "jaggedness" in the plot of the second derivative, and that is why we take the second point
+statPoint_TrainValid <- 22 # 2nd derivative is neither smooth nor monotonic
 # statPoint_TrainValid <- which(abs(datEventRate_TrainValid_1st) < 10^(-9))[1]
 # - Find corresponding x-values at index
 SubSamp_PopTrain <- datGraph$SubSample_FullSize_Mean[statPoint_PopTrain+1] # (x + 1 to correspond to indices of original vector)
@@ -458,7 +463,7 @@ label.v2 <- list(expression(italic(D)*" vs "*italic(D[T])),
     geom_line(aes(colour=Set, linetype=Set), linewidth=0.5) + 
     geom_point(aes(x=SubSample_FullSize_Mean, y=Value, colour=Set, shape=Set), size=1.3) + 
     # annotate data table
-    annotate(geom="table", x=4000000, y=0.011, family=chosenFont, size=2.9,
+    annotate(geom="table", x=4000000, y=0.2, family=chosenFont, size=2.9,
             label=datAnnotate, parse=T) +
     # facets & scale options
     facet_grid(Facet_label ~ ., labeller=label_parsed) + 
@@ -470,7 +475,7 @@ label.v2 <- list(expression(italic(D)*" vs "*italic(D[T])),
     scale_x_continuous(breaks=pretty_breaks(), label=label_comma(scale=0.000001, suffix="m"))
 )
 # - Save graph
-ggsave(g1, file=paste0(genFigPath_Res, "DefaultRates_SubSampleRates_Experiment.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
+ggsave(g1, file=paste0(genFigPath, "DefaultRates_SubSampleRates_Experiment.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
 
 
 # --- Cleanup
