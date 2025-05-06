@@ -1,3 +1,6 @@
+
+### AB [2025-05-05]: Deprecated since it is superceded by tROC-function
+
 # Cumulative cases/ dynamic controls vs Incident Cases vs dynamic controls
 #-------------------------
 

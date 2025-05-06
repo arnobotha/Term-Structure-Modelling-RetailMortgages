@@ -4,7 +4,7 @@
 # resolution type, and the extend of tied events (Proportion tied relative to total event time frequencies)
 # ------------------------------------------------------------------------------------------------------
 # PROJECT TITLE: Default survival modelling
-# SCRIPT AUTHOR(S): Dr Arno Botha, Bernard Scheepers
+# SCRIPT AUTHOR(S): Dr Arno Botha (AB), Bernard Scheepers (BS)
 # ------------------------------------------------------------------------------------------------------
 # -- Script dependencies:
 #   - 0.Setup.R
@@ -51,7 +51,7 @@ describe(datAggr$MaxPerfNum_Binned); hist(datAggr$MaxPerfNum_Binned)
 # at least anecdotally. However, when subsampling, this binning scheme may need to be revisited to allow feasible sample sizes
 
 # - Aesthetic engineering
-chosenFont <- "Cambria"; dpi <- 200; colPalette <- "BrBG"
+chosenFont <- "Cambria"; colPalette <- "BrBG"
 datAggr[MaxPerfNum_Binned > 0, MaxPerfNum_Binned_Total := .N]
 totFreq <- datAggr[MaxPerfNum_Binned > 0, .N]
 datAggr2 <- unique(datAggr[MaxPerfNum_Binned > 0, list(MaxPerfNum_Binned_Pc = .N / MaxPerfNum_Binned_Total,
@@ -72,7 +72,8 @@ vCol <- brewer.pal(10, "Paired")
   scale_x_continuous(labels=vLabelX, breaks=vBreaks) )
 
 # - Save graph
-ggsave(g1, file=paste0(genFigPath, "FULL SET/MaxPerfSpellNum_hist.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
+dpi <- 200
+ggsave(g1, file=paste0(genFigPath, "MaxPerfSpellNum_hist.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
 
 # House keeping
 rm(datAggr,datAggr2,lookup,g1);gc()
@@ -128,8 +129,10 @@ vCol <- brewer.pal(9, "Set1")
 
 # - Save graph
 dpi <- 220
-ggsave(g1, file=paste0(genFigPath, "FULL SET/DefResolRate_SpellNumber.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
+ggsave(g1, file=paste0(genFigPath, "DefResolRate_SpellNumber.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
 
+# - Cleanup
+rm(datAggr_cohorts, datGraph)
 
 
 
@@ -162,7 +165,7 @@ datSurv$PerfSpellResol_Type_Hist %>% table() %>% prop.table()
 
 
 # - Graphing Parameters
-chosenFont <- "Cambria"; dpi <- 170
+chosenFont <- "Cambria"
 vCol <- brewer.pal(10, "Paired")[c(10,6,4, 2,1,8)]
 vCol2 <- brewer.pal(10, "Paired")[c(10,5,3, 1,2,8)]
 vLabels <- c(paste0("a_Default"="Default (", round(Resol_Type.props[1]*100, digits=1), "%)"), # Need to round to the first decimal place to ensure that the prior add up to one
@@ -179,7 +182,8 @@ vLabels2 <- c(paste0("a_Settlement"="Settlement (", round(Resol_Type2.props[1]*1
          x=bquote("Performing spell ages (months)"*~italic(T[ij]))) + 
     theme(text=element_text(family=chosenFont),legend.position.inside=c(0.785,0.2), 
           strip.background=element_rect(fill="snow2", colour="snow2"),
-          strip.text = element_text(size=8, colour="gray50"), strip.text.y.right = element_text(angle=90)) + 
+          strip.text = element_text(size=8, colour="gray50"), strip.text.y.right = element_text(angle=90),
+          legend.position=c(0.75,0.20)) + 
     # Graphs
     geom_histogram(aes(y=after_stat(density), colour=Resol_Type, fill=Resol_Type), position="identity",
                    alpha=0.75, size=0.2) + 
@@ -222,7 +226,8 @@ ymax <- max(ggplot_build(g1_Densities_Resol_Type)$layout$panel_params[[1]]$y.ran
 (plot.full <- g1_Densities_Resol_Type + annotation_custom(grob = ggplotGrob(g2_Densities_Resol_Type2), xmin=100, xmax=500, ymin=ymin, ymax=ymax))
 
 # - Save plot
-ggsave(plot.full, file=paste0(genFigPath,"FULL SET/Default-FailureTime-Densities.png"),width=1350/dpi, height=1000/dpi,dpi=dpi, bg="white")
+dpi <- 170
+ggsave(plot.full, file=paste0(genFigPath,"Default-FailureTime-Densities.png"),width=1350/dpi, height=1000/dpi,dpi=dpi, bg="white")
 
 # - Clean-up
 rm(datSurv, datSurv2, g1_Densities_Resol_Type, g2_Densities_Resol_Type2, plot.full)
@@ -276,7 +281,7 @@ datAggr <- rbind(datAggr,
                             Freq_Sum = sumTimeFreqs_b, Freq_Perc = expTied_b))
 
 # - Graphing Parameters
-chosenFont <- "Cambria"; dpi <- 170
+chosenFont <- "Cambria"
 vCol <- brewer.pal(10, "Paired")[c(10,8, 9, 7)]
 vLabels <- c("a_Default"=paste0("Default (", round(Resol_Type_LR.props[1]*100, digits=1), "%)"), # Need to round to the first decimal place to ensure that the prior add up to one
              "b_Right-censored"=paste0("Right-censored & competing risks (", round(Resol_Type_LR.props[2]*100, digits=1), "%)"),
@@ -306,7 +311,8 @@ vLabels <- c("a_Default"=paste0("Default (", round(Resol_Type_LR.props[1]*100, d
   scale_x_continuous(breaks=breaks_pretty(), label=comma) )
 
 # - Save plot
-ggsave(g1, file=paste0(genFigPath,"FULL SET/TiedEvents_Extent.png"),width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
+dpi <- 170
+ggsave(g1, file=paste0(genFigPath,"TiedEvents_Extent.png"),width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
 
 # - Cleanup
 rm(datAggr, datSpells, g1)

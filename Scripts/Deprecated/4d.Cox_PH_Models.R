@@ -1,3 +1,8 @@
+
+### AB [2025-05-05]: Deprecated since the Cox-model from LifetimePD-TermStructure-RecurrentEvents 
+# codebase is taken given its much greater maturity.
+
+
 # ====================================== Cox PH Model ======================================
 # The training dataset is used to fit various Cox PH models with variables split according
 # grouped into themes. The models are evaluated at each fit and the significant set of 
