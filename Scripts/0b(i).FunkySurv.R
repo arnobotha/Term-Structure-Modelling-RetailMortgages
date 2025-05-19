@@ -71,15 +71,15 @@ corrAnalysis <- function(data_train, variables, corrThresh = 0.6, method = 'spea
 TimeDef_Form <- function(TimeDef, variables, strataVar=""){
   # Create formula based on time definition of the dataset.
   if(TimeDef=="TFD"){# Formula for time to first default time definition (containing only the fist performance spell).
-    formula <- as.formula(paste0("Surv(Start,End,Default_Ind) ~ ",
+    formula <- as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ ",
                                  paste(variables,collapse=" + ")))
     
   } else if(TimeDef=="AG"){# Formula for Andersen-Gill (AG) time definition
-    formula <- as.formula(paste0("Surv(Start,End,Default_Ind) ~ PerfSpell_Num + ",
+    formula <- as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ PerfSpell_Num + ",
                                  paste(variables,collapse=" + ")))
     
   } else if(TimeDef=="PWPST"){# Formula for Prentice-Williams-Peterson (PWP) Spell time definition
-    formula <- as.formula(paste0("Surv(Start,End,Default_Ind) ~ strata(", strataVar, ") + ",
+    formula <- as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ strata(", strataVar, ") + ",
                                  paste(variables,collapse=" + ")))
   } else {stop("Unkown time definition")}
   
@@ -94,6 +94,8 @@ TimeDef_Form <- function(TimeDef, variables, strataVar=""){
 #         [it]: Number of variables being compared; [logPath], Optional path for log file for logging purposes;
 #         [fldSpellID]: Field name of spell-level ID.
 calc_AIC <- function(formula, data_train, variables="", it=NA, logPath="", fldSpellID="PerfSpell_Key") {
+  # - Testing conditions
+  # j <- 1; formula=TimeDef_Form(TimeDef,variables[j], strataVar=strataVar); 
   
   tryCatch({
     model <- coxph(formula,id=get(fldSpellID), data = data_train) # Fit Cox model
@@ -128,8 +130,8 @@ calc_AIC <- function(formula, data_train, variables="", it=NA, logPath="", fldSp
 aicTable <- function(data_train, variables, fldSpellID="PerfSpell_Key",
                       TimeDef, numThreads=6, genPath, strataVar="") {
   # - Testing conditions
-   # data_train <- datCredit_train_PWPST; TimeDef="PWPST"; numThreads=6
-   # fldSpellID<-"PerfSpell_Key"; variables<-"g0_Delinq_SD_4";
+   # data_train <- datCredit_train; TimeDef="PWPST"; numThreads=6
+   # fldSpellID<-"PerfSpell_Key"; variables<-"g0_Delinq_SD_4"; strataVar="PerfSpell_Num_binned"
   
   # - Iterate across loan space using a multi-threaded setup
   ptm <- proc.time() #IGNORE: for computation time calculation
@@ -280,7 +282,7 @@ calcBStat <- function(formula, data_train, fldSpellID="PerfSpell_Key", vEvents, 
 #         [genPath]: Optional path for log file.
 # Output: [Results]:  Results table.
 csTable <- function(data_train, variables, TimeDef, seedVal=1, numIt=5, 
-                    fldSpellID="PerfSpell_Key", fldLstRowInd="PerfSpell_Exit_Ind", fldEventInd="Default_Ind",
+                    fldSpellID="PerfSpell_Key", fldLstRowInd="PerfSpell_Exit_Ind", fldEventInd="DefaultStatus1",
                     numThreads=6, genPath=NA, strataVar=""){
   
   # - Testing conditions
@@ -430,7 +432,6 @@ survQuants <- function(datGiven, coxGiven, it=1, numKeys, genPath="", timeVar="E
   
   return(datSurv)
 }
-
 
 
 

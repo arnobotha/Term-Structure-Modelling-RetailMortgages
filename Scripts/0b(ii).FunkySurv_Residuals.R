@@ -38,7 +38,7 @@ calc_CoxSnell_Adj <- function(model, vIDs, vEvents) {
 #                     with the unit exponential distribution function.
 GoF_CoxSnell_KS <- function(cox, data_train, data_valid, GraphInd=T, legPos=c(0.5,0.5),
                             panelTitle="", fileName=NA,fldLstRowInd="PerfSpell_Exit_Ind",
-                            fldEventInd="Default_Ind",fldSpellID="PerfSpell_Key",
+                            fldEventInd="DefaultStatus1",fldSpellID="PerfSpell_Key",
                             dpi=350, chosenFont="Cambria") {
   # - Testing conditions
   # cox <- coxDelinq; data_train <- datCredit_train_TFD; GraphInd<-T; legPos<-c(0.5,0.5)
