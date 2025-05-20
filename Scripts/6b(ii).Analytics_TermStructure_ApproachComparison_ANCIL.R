@@ -479,8 +479,11 @@ test1 <- subset(datSurv_PWPST, PerfSpell_Key %in% vSpellKeys[1])
 test2 <- subset(datCredit_valid, PerfSpell_Key %in% vSpellKeys[1],
                select=c("LoanID", "Date", vecVars_PWPST_adv, "PerfSpell_Key", "PerfSpell_Num","PerfSpell_Counter","Start", 
                         "TimeInPerfSpell", "DefaultStatus1", "CHaz", "Survival", "EventRate"))
-plot(test1$Survival)
-plot(test2$Survival)
+plot(test1$Survival); plot(test2$Survival)
+### RESULTS: Despite the simplicity of Approach 3 (and runtime reduction), it produces unintuitive results in 
+# the survival probability for a single test case, as opposed to those from survQuants() from Approach 1.
+# The resulting term-structure looks similar to the KM-analysis (event probabilities), though has greater discrepancy.
+# Lastly, the event probabilities are negative in some cases, which violates the axioms of probabilities.
 
 
 
