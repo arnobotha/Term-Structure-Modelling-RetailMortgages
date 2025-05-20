@@ -397,7 +397,7 @@ survQuants <- function(datGiven, coxGiven, it=1, numKeys, genPath="", timeVar="E
       file=paste0(genPath,"survQuants_log.txt"), append=T)
   
   # - Compile survival table
-  datSurv <- data.table(PerfSpell_Key = unique(datGiven$PerfSpell_Key), End=datGiven$End, # composite key
+  datSurv <- data.table(PerfSpell_Key = unique(datGiven$PerfSpell_Key), End=datGiven[[timeVar]], # composite key
                         CHaz=survFit_pred$cumhaz, #RiskSetSize=survFit_pred$n.risk,
                         #NumEvents=survFit_pred$n.event, NumCensored=survFit_pred$n.censor,
                         Survival=round(survFit_pred$surv,digits=15))
