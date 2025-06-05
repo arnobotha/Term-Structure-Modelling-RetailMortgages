@@ -1,4 +1,4 @@
-# ======================================= INPUT SPACE: Basic  =======================================
+# ======================================= INPUT SPACE: Cox PH (PWP) ====================================
 # Divide data into thematic groups and perform data analysis on them to compile an input space for the TPWPST model
 # ------------------------------------------------------------------------------------------------------
 # PROJECT TITLE: Default survival modelling

@@ -506,45 +506,98 @@ multicollinearity <- function(model){
   return(vif_model)
 }
 
-# - function to compute the accuracy, precision, and recall
-# Input:
-# 3 parameters relating to the model that must be analysed, the data set that
-# contains the target variable, and the cut-off imposed that flags accounts as 
-# SICR, i.e., the cut-off imposed on the posterior probability output
-# Output:
-# A data table containing the accuracy, precision, and recall of the model under consideration
-accuracy_prec_rec <- function(model, dat_set, cut_off){
+
+
+# -------- Diagnostic functions for Logit Models
+
+# --- Pseudo R^2 measures for classifiers
+# Calculate a pseudo coefficient of determination (R^2) \in [0,1] for glm assuming binary
+# logistic regression as default, based on the "null deviance" in likelihoods
+# between the candidate model and the intercept-only (or "empty/worst/null") model.
+# NOTE: This generic R^2 is NOT equal to the typical R^2 used in linear regression, i.e., it does
+# NOT explain the % of variance explained by the model; but rather it denotes the %-valued degree
+# to which the candidate's fit can be deemed as "perfect".
+# Implements McFadden's pseudo R^2, Cox-Snell generalised R^2, Nagelkerke's improvement upon Cox-Snell's R^2
+# see https://bookdown.org/egarpor/SSS2-UC3M/logreg-deviance.html ; https://web.pdx.edu/~newsomj/cdaclass/ho_logistic.pdf; 
+# https://statisticalhorizons.com/r2logistic/
+# https://stats.stackexchange.com/questions/8511/how-to-calculate-pseudo-r2-from-rs-logistic-regression
+coefDeter_glm <- function(model, model_base = NA) {
   
-  predict_model <- predict(model, dat_set, type = 'response')
+  # - Safety check
+  if (!any(class(model) %in% c("glm","multinom"))) stop("Specified model object is not of class 'glm' or 'lm'. Exiting .. ")
   
-  # Confusion matrix
-  confusion_mat_model <- table(dat_set$DefaultStatus1_LS, predict_model > cut_off)
+  # model <- modMLR
   
-  # Accuracy
-  accuracy_model <- sum(diag(confusion_mat_model)) / sum(confusion_mat_model)
+  # -- Preliminaries
+  require(scales) # for formatting of results
+  L_full <- logLik(model) # log-likelihood of fitted model, ln(L_M)
+  nobs <- attr(L_full, "nobs") # sample size, same as NROW(model$model)
   
-  # Precision
-  tp <- confusion_mat_model[2, 2]
-  fp <- confusion_mat_model[1, 2]
+  # Fit a base/empty model if not available
+  if (any(is.na(model_base))) {
+    orig_formula <- deparse(unlist(list(model$formula, formula(model), model$call$formula))[[1]]) # model formula
+    orig_call <- model$call; calltype.char <- as.character(orig_call[1]) # original model fitting call specification, used merely for "plumbing"
+    data <- model.frame(model) # data matrix used in fitting the model (model$model)
+    # get weight matrix corresponding to each observation, if applicable/specified, otherwise, this defaults to just the 0/1-valued observations (Y)
+    if (!is.null(model$prior.weights) & length(model$prior.weights) > 0) {
+      weights <- model$prior.weights
+    } else if (!is.null(data$`(weights)`) & length(data$`(weights)` > 0)) {
+      weights <- data$`(weights)`
+    } else weights <- NULL
+    data <- data[, 1, drop=F]; names(data) <- "y"
+    nullCall <- call(calltype.char, formula = as.formula("y ~ 1"), data = data, weights = weights, family = model$family, 
+                     method = model$method, control = model$control, offset = model$offset)
+    model_base <- eval(nullCall) # fit base/null model
+  } 
+  L_base <- logLik(model_base) # log-likelihood of the null model, ln(L_0)
   
-  Prec <- tp / (tp + fp)
+  # -- Implement the McFadden pseudo R^2 measure from McFadden1974, R^2 = 1 - log(L_M)/log(L_0)
+  # NOTE: null deviance L_0 plays an analogous role to the residual sum of squares in linear regression, therefore
+  # McFadden's R^2 corresponds to a proportional reduction in "error variance", according to Allison2013 (https://statisticalhorizons.com/r2logistic/)
+  # NOTE2: deviance (L_M) and null deviance (L_0) within a GLM-object is already the log-likelihood since deviance = -2*ln(L_M) by definition
+  # https://stats.stackexchange.com/questions/8511/how-to-calculate-pseudo-r2-from-rs-logistic-regression
+  if (any(class(model) == "multinom") ) {
+    coef_McFadden <- 1 - (as.numeric(L_full) / as.numeric(L_base))
+  } else coef_McFadden <- 1 - model$deviance / model$null.deviance
   
-  # Recall
-  tp <- confusion_mat_model[2, 2]
-  fn <- confusion_mat_model[2, 1]
+  if ( !all.equal(coef_McFadden, as.numeric(1 - (-2*L_full)/(-2*L_base) ) ) ) stop("ERROR: Internal function error in calculating & verifying McFadden's pseudo R^2-measure")
   
-  Rec <- tp / (tp + fn)
   
-  # Create a dataset to return the measures
-  Performance_model <- data.table(Measures = c("Accuracy", "Precision", "Recall"),
-                                  Values = c(accuracy_model, Prec, Rec))
+  # -- Implement Cox-Snell R^2 measure from Cox1983, which according to Allison2013 is more a "generalized" R^2 measure than pseudo,
+  # given that its definition is an "identity" in normal-theory linear regression. Can therefore be used to other regression settings using MLE,
+  # E.g., negative binomial regression for count data or Weibull regression for survival data
+  # Definition: R^2 = 1 - (L_0/L_F)^(2/nobs), but equivalent to below given that L_base = ln(L0) and L_full = ln(L_full)
+  # Why? Since (L_0/L_F)^(2/nobs) can be rewritten as exp[ ln( (L_0/L_F)^(2/nobs) )] which simplifies to exp[ (2/nobs) . ln( L_0/L_F )] given property ln(a^b) = b.ln(a),
+  # finally becoming exp[ (2/nobs) . ( ln( L_0 ) - ln( L_F)) ]  given property ln(a/b) = ln(a) - ln(b).
+  # The below is numerically expedient in avoiding "underflow" memory issues when dealing with large negative log-likelihood values that should rather not be exponentiated.
+  # Source: DescTools::PseudoR2 function in DescTools package
+  coef_CoxSnell <- as.numeric( 1 - exp(2/nobs * (L_base - L_full)) )
   
-  return(Performance_model)
   
+  # -- Implement Nagelkerke R^2 from Nagelkerke1991, which according to Allison2013 improves upon Cox-Snell R^2 by ensuring an upper bound of 1
+  # NOTE: Cox-Snell R^2 has an upper bound of 1 - (L_0)^(2/n), which can be considerably less than 1.
+  # This comes at the cost of reducing the attractive theoretical properties of the Cox-Snell R^2 
+  if (any(class(model) == "multinom") ) {
+    coef_Nagelkerke <- (1 - exp((model$deviance - model_base$deviance)/nobs))/(1 - exp(-model_base$deviance/nobs))
+  } else {
+    coef_Nagelkerke <- (1 - exp((model$deviance - model$null.deviance)/nobs))/(1 - exp(-model$null.deviance/nobs))
+  }
+  
+  
+  # -- Report results
+  return( data.frame(McFadden=percent(coef_McFadden, accuracy=0.01), CoxSnell=percent(coef_CoxSnell, accuracy=0.01), Nagelkerke=percent(coef_Nagelkerke, accuracy=0.01)) )
+  
+  ### NOTE: All of the above were tested and confirmed to equal the results produced below:
+  # DescTools::PseudoR2(model, c("McFadden", "CoxSnell", "Nagelkerke"))
+  
+  # - cleanup (only relevant whilst debugging this function)
+  rm(model, L_full, L_base, nobs, data, nullCall, orig_formula, orig_call, weights, coef_McFadden, coef_CoxSnell, coef_Nagelkerke)
 }
-
-
-
-
+# - Unit test
+# install.packages("ISLR"); require(ISLR)
+# datTrain_simp <- data.table(ISLR::Default); datTrain_simp[, `:=`(default=as.factor(default), student=as.factor(student))]
+# logit_model <- glm(default ~ student + balance + income, data=datTrain_simp, family="binomial")
+# coefDeter_glm(logit_model)
+### RESULTS: candidate is 46% (McFadden) better than null-model in terms of its deviance
 
 

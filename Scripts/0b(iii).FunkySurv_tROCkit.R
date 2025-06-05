@@ -440,7 +440,7 @@ tROC <- function(datGiven, cox, month_Start=0, month_End, sLambda=0.05, estMetho
 # ROC-graph, itself constructed using the trapezoidal rule from Mason2002 (DOI: https://doi.org/10.1256/003590002320603584),
 # and the AUC-statistic in summarising the ROC-graph.
 # Input:  [datGiven]: A validation dataset containing the variables of interest for testing prediction accuracy.
-#         [cox]: A fitted cox model used to obtain marker values (theoretically either the risk scores exp(\beta.X)
+#         [modGiven]: A fitted cox/GLM model used to obtain marker values (theoretically either the risk scores exp(\beta.X)
 #               or simply just the linear combination \beta.X.
 #         [month_Start]: The prediction starting period of the time range over which prediction accuracy is tested.
 #         [month_End], The last prediction period of the time range over which prediction accuracy is tested.
@@ -465,7 +465,7 @@ tROC <- function(datGiven, cox, month_Start=0, month_End, sLambda=0.05, estMetho
 #         [logPath]: A given path directory in which the log file is stored in tracking the performance of the multithreaded loop
 # Output: [AUC]: The time-dependent Area under the curve (AUC) in summarising the corresponding time-dependent ROC-graph
 #         [ROC_graph]: The associated ROC-graph as a ggplot-object
-tROC.multi <- function(datGiven, cox, month_Start=0, month_End, sLambda=0.05, estMethod="NN-0/1", numDigits=2, 
+tROC.multi <- function(datGiven, modGiven, month_Start=0, month_End, sLambda=0.05, estMethod="NN-0/1", numDigits=2, 
                        fld_ID=NA, fld_Event="MainEvent_Ind", eventVal=1, fld_StartTime="Start", fld_EndTime="Stop",
                        Graph=TRUE, graphName="timedROC-Graph", genFigPathGiven=paste0(getwd(),"/"), numThreads=4, 
                        caseStudyName="Main",reportFlag=T, logPath=paste0(getwd(),"/"), predType="exp") {
@@ -481,17 +481,19 @@ tROC.multi <- function(datGiven, cox, month_Start=0, month_End, sLambda=0.05, es
   # fld_ID="PerfSpell_Key"; fld_Event="PerfSpell_Event"; eventVal=1; fld_StartTime="Start"; fld_EndTime="End";
   # graphName="DefaultSurvModel-Cox1_Depedendence"; genFigPathGiven=paste0(genFigPath, "/TFD"); numThreads=6; reportFlag=T; caseStudyName="Main"
   # logPath=genPath
+  # -- Testing conditions 3 (real-world Cox Proportional Odds model)
+  # modGiven=modLR
   
   
   # -- Error handling
   if (!is.data.table(datGiven)) {
     stop("[datGiven] must be a data table.\n")
   }# Test whether datGiven is a data table
-  if (!inherits(cox, "coxph")) {
-    stop("[cox] must be a valid 'coxph' model object.\n")
+  if (!any( class(modGiven) %in% c("coxph","lm","glm"))) {
+    stop("[modGiven] must be a valid 'coxph' or 'glm' model object.\n")
   }# Test whether [cox] is a coxph model
   if (!all(all.vars(formula(cox)) %in% colnames(datGiven))){
-    stop("[datGiven] does not contain the variables required within the [cox] object.\n")
+    stop("[datGiven] does not contain the variables required within the [modGiven] object.\n")
   }# Test whether [datGiven] contains the variables on which [cox] was built
   if (!is.numeric(month_Start) || !is.numeric(month_End)) {
     stop("[month_Start] and [month_End] must be numeric.\n")
@@ -514,7 +516,7 @@ tROC.multi <- function(datGiven, cox, month_Start=0, month_End, sLambda=0.05, es
   # -- Obtain Markers/prediction scores M_i for i=1,...,n cases (not necessarily subjects) and assign as thresholds
   # - Score the given dataset using the given Cox regression model towards obtaining marker 
   # values (option: linear predictors)
-  datGiven[, Marker := round(predict(cox, newdata=datGiven, type=predType),numDigits)]
+  datGiven[, Marker := round(predict(modGiven, newdata=datGiven, type=predType),numDigits)]
   # - Let the unique marker values represent our threshold space, which is standard practice in ROC-analysis
   thresholds <- datGiven$Marker %>% unique() %>% sort()
   nThresh <- length(thresholds) # number of such unique thresholds for iteration purposes
@@ -593,7 +595,7 @@ tROC.multi <- function(datGiven, cox, month_Start=0, month_End, sLambda=0.05, es
       # - Initialize empty data structures for implementing the current method
       #S_t <- numeric(nThresh) #Initialise the eventual survival probability vector across unique ordered failure times
       
-      # - Obtain unique Markers (predictions from the given Cox-model), and order them as before according to 
+      # - Obtain unique Markers (predictions from the given Cox/GLM-model), and order them as before according to 
       # the indices of the ordered unique event times
       vMarkers_unique <- unique(datGiven$Marker) 
       vMarkers_unique <- vMarkers_unique[order(vMarkers_unique)]
@@ -738,7 +740,7 @@ tROC.multi <- function(datGiven, cox, month_Start=0, month_End, sLambda=0.05, es
       datGraph <- data.frame(x = vFPR[-(nThresh+1)], y=vTPR[-1])
       datSegment <- data.frame(x = 0, y = 0, xend = 1, yend = 1)
       # - Annotate with concordance (Harrell's C)
-      conc=percent(as.numeric(concordance(cox,newdata=datGiven)[1]),accuracy=0.001)
+      conc=percent(as.numeric(concordance(modGiven,newdata=datGiven)[1]),accuracy=0.001)
       
       
       # - Aesthetic parameters

@@ -316,3 +316,67 @@ ggsave(g1, file=paste0(genFigPath,"TiedEvents_Extent.png"),width=1200/dpi, heigh
 
 # - Cleanup
 rm(datAggr, datSpells, g1)
+
+
+
+
+
+
+# ----------------- 5. Extent of censored spells over spell age
+datAggr <- datCredit_real[, list(CensorRate = mean(ifelse(PerfSpellResol_Type_Hist=="Censored", 1, 0), na.rm=T)), 
+                          by=list(PerfSpell_Age)]
+datAggr[, Resol_Type := "Right-censoring rate"]
+
+describe(datAggr[PerfSpell_Age<=300, CensorRate]); hist(datAggr[PerfSpell_Age<=300, CensorRate], breaks="FD")
+
+# - Annotations
+sMeanCensor <- mean(datAggr[PerfSpell_Age<=300, CensorRate], na.rm=T)
+
+# - Graphing Parameters
+chosenFont <- "Cambria"
+vCol <- brewer.pal(10, "Paired")[c(2,1)]
+
+(ggOuter <- ggplot(datAggr[PerfSpell_Age<=300, ], aes(x=CensorRate)) + theme_minimal() +
+  labs(y="Histogram and empirical density", 
+       x="Censoring rate per unique spell age") + 
+  theme(text=element_text(family=chosenFont),legend.position="inside", 
+        legend.position.inside = c(0.2,0.4), 
+        strip.background=element_rect(fill="snow2", colour="snow2"),
+        strip.text = element_text(size=8, colour="gray50"), strip.text.y.right = element_text(angle=90)) + 
+  # Graphs
+  geom_histogram(aes(y=after_stat(density), colour=Resol_Type, fill=Resol_Type), position="identity",
+                 alpha=0.75, size=0.2, show.legend = F) + 
+  geom_density(aes(colour=Resol_Type), linewidth=0.8, show.legend = F) + 
+  scale_colour_manual(name="", values=vCol[1]) + 
+  scale_fill_manual(name="", values=vCol[2]) + 
+  scale_y_continuous(label=comma) + scale_x_continuous(label=percent))
+
+
+(ggInner <- ggplot(datAggr[PerfSpell_Age<=300,], aes(x=PerfSpell_Age, y=CensorRate)) + theme_bw() +
+  labs(y="Mean censoring rate (%)", x="Spell age") + 
+  theme(text=element_text(size=12, family="Cambria"),
+        #specific for plot-in-plot
+        axis.text.y=element_text(margin=unit(c(0,0,0,0), "mm"), size=9),
+        axis.text.x=element_text(margin=unit(c(0,0,0,0), "mm"), size=9),
+        axis.ticks=element_blank(), #axis.title.x=element_blank(), #axis.title.y=element_blank(),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+        panel.background = element_rect(color="black", fill="white"),
+        plot.background = element_rect(color="white"), plot.margin = unit(c(0,0,0,0),"mm"),
+        plot.title = element_text(hjust=0.55,vjust=-10,margin=margin(t=-12))) + 
+  geom_line(aes(colour=Resol_Type), show.legend = F) + 
+  geom_point(aes(colour=Resol_Type), show.legend=F, size= 0.5) + 
+    geom_hline(aes(colour=Resol_Type), linewidth=0.6, yintercept=sMeanCensor) +
+    annotate(geom="text", label=paste0("Mean: ", percent(sMeanCensor,accuracy=0.01)),
+             x=75, y=0.6,family=chosenFont, size=4) + 
+  scale_colour_manual(name="", values=vCol[1]) + 
+  scale_y_continuous(label=percent))
+
+
+# - Combining the two above plots onto a single graph
+ymin <- diff(ggplot_build(ggOuter)$layout$panel_params[[1]]$y.range) * 0.45
+ymax <- max(ggplot_build(ggOuter)$layout$panel_params[[1]]$y.range) * 0.975
+(plot.full <- ggOuter + annotation_custom(grob = ggplotGrob(ggInner), xmin=0.45, xmax=0.875, ymin=ymin, ymax=ymax))
+
+# - Save plot
+dpi <- 170
+ggsave(plot.full, file=paste0(genFigPath,"CensoringRate-HistogramDensity.png"),width=1350/dpi, height=1000/dpi,dpi=dpi, bg="white")

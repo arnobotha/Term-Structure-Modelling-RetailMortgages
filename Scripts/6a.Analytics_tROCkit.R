@@ -101,7 +101,7 @@ summary(cox_PWPST_adv); AIC(cox_PWPST_adv); concordance(cox_PWPST_adv)
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 3
-objROC1_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, cox=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+objROC1_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                                 fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
                                 graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPath=paste0(genFigPath), 
                                 caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
@@ -115,7 +115,7 @@ proc.time() - ptm
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 12
-objROC2_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, cox=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4,
+objROC2_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4,
                                 fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
                                 graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPath=paste0(genFigPath),
                                 caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
@@ -129,7 +129,7 @@ proc.time() - ptm
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 24
-objROC3_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, cox=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+objROC3_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                                 fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
                                 graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPath=paste0(genFigPath), 
                                 caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
@@ -143,7 +143,7 @@ proc.time() - ptm
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 36
-objROC4_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, cox=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+objROC4_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                                 fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
                                 graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPath=paste0(genFigPath), 
                                 caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
@@ -165,7 +165,7 @@ proc.time() - ptm
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 3
-objROC1_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, cox=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+objROC1_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                           fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
                           graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPath=paste0(genFigPath), 
                           caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
@@ -179,7 +179,7 @@ proc.time() - ptm
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 12
-objROC2_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, cox=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4,
+objROC2_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4,
                           fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
                           graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPath=paste0(genFigPath),
                           caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
@@ -193,7 +193,7 @@ proc.time() - ptm
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 24
-objROC3_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, cox=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+objROC3_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                           fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
                           graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPath=paste0(genFigPath), 
                           caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
@@ -207,7 +207,7 @@ proc.time() - ptm
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 36
-objROC4_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, cox=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+objROC4_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                           fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
                           graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPath=paste0(genFigPath), 
                           caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
