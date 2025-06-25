@@ -250,3 +250,10 @@ vLineType <- c("dashed", "solid", "dashed", "solid", "dashed", "solid")
 dpi <- 180 # reset
 ggsave(gsurv_ft, file=paste0(genFigPath, "EventProb_", mainEventName,"_ActVsExp_CoxDisc.png"),
        width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
+
+
+# --- Cleanup
+rm(gsurv_ft, km_Censoring, km_Default, datSurv_censoring, datSurv_exp, datSurv_sub,
+   datGraph, datFusion, smthEventRate_Act, smthEventRate_Exp_bas, smthEventRate_Exp_adv,
+   vPredSmth_Act, vPredSmth_Exp_bas, vPredSmth_Exp_adv,
+   modLR, modLR_basic)

@@ -668,7 +668,7 @@ pack.ffdf(paste0(genObjPath,"CoxDisc_advanced_fits"), Table_CoxDisc)
 
 
 
-
+###################################################################################### AB: Restructure somewhere
 # ------ 2. Analytics: At-risk proportion over unique failure times
 
 # - General parameters
@@ -708,96 +708,4 @@ vLabel <- c("a_AtRisk"=bquote("At-risk % of max("*italic(n)[t]*")"),
 dpi <- 180 # reset
 ggsave(gAtRisk, file=paste0(genFigPath, "Approach1_EventProb_SpellLevel_FirstSpell_ActVsExp.png"),
        width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
-
-
-
-
-###### SCRATCH: Time-dependent brier score
-
-# --- Preliminaries
-# - Create pointer to the appropriate data object 
-datCredit <- rbind(datCredit_train, datCredit_valid)
-
-
-# --- Estimate survival rate of the censoring event G(t) = P(C >= t) for time-to-censoring variable C
-# This prepares for implementing the Inverse Probability of Censoring Weighting (IPCW) scheme,
-# as an adjustment to event rates (discrete density), as well as for the time-dependent Brier score
-
-# - Compute Kaplan-Meier survival estimates (product-limit) for censoring-event | Spell-level with right-censoring & left-truncation
-km_Censoring <- survfit(Surv(time=TimeInPerfSpell-1, time2=TimeInPerfSpell, event=PerfSpell_Censored==1, type="counting") ~ 1, 
-                        id=PerfSpell_Key, data=datCredit)
-summary(km_Censoring)$table # overall summary statistics
-# plot(km_Censoring, conf.int = T) # survival curve
-datG <- data.table(TimeInPerfSpell = summary(km_Censoring)$time, G_t = summary(km_Censoring)$surv)
-datG_ti <- data.table(EventTime = summary(km_Censoring)$time, G_Ti = summary(km_Censoring)$surv)
-
-
-# --- Calculate survival quantities of interest
-# Predict hazard h(t) = P(T=t | T>= t) in discrete-time
-datCredit[, Hazard := predict(modLR, newdata=datCredit, type = "response")]
-# Derive survival probability S(t) = \prod ( 1- hazard)
-datCredit[, Survival := cumprod(1-Hazard), by=list(PerfSpell_Key)]
-# - Merge censoring survival probability unto main set
-datCredit <- merge(datCredit, datG, by="TimeInPerfSpell", all.x=T)
-datCredit[is.na(G_t), G_t := 1] # Fill any missing G_t with 1 (no censoring information)
-
-
-# --- Compute Censoring survival probability at age T_i for each subject (i,j), i..e, G_hat(T_i)
-# This requires mapping each subject's observed event time (Spell age) to g_hat(T_i)
-datCredit <- merge(datCredit, datG_ti, by.x="PerfSpell_Age", by.y="EventTime", all.x=T)
-datCredit[is.na(G_Ti), G_Ti := 1]
-
-
-# ---- Compute quantities of time-dependent Brier score (tBS)
-# - Compute binary event indicator at time t: y(t) = I(T>t)
-datCredit[, y_t := as.integer(PerfSpell_Age > TimeInPerfSpell)]
-# - Compute weighted Brier score at each time point
-datCredit[, Weight_w := fifelse(PerfSpell_Age > TimeInPerfSpell, 1/G_t,
-                                fifelse(PerfSpell_Age <= TimeInPerfSpell & PerfSpellResol_Type_Hist=="Defaulted", 1/G_Ti,
-                                        0)), by=list(PerfSpell_Key)]
-# --Compute squared error loss per row ---
-datCredit[, SquaredError := (y_t - Survival)^2]
-
-
-# --- Aggregate and compute weighted Brier score per time point
-datTBS <- datCredit[Weight_w > 0, .(
-  Brier = mean(Weight_w * SquaredError, na.rm = TRUE)
-), by = TimeInPerfSpell]# --- Step 7: Compute squared error loss per row --
-(IBS <- mean(datTBS[TimeInPerfSpell<=300,Brier]))
-
-
-plot(datTBS[TimeInPerfSpell<=300,TimeInPerfSpell], datTBS[TimeInPerfSpell<=300,Brier], type = "s", lwd = 2, col = "blue",
-     ylab = "Brier Score", xlab = "Time", main = "Time-dependent Brier Score")
-abline(h = IBS, col = "red", lty = 2)
-legend("topright", legend = paste("IBS =", round(IBS, 4)), col = "red", lty = 2)
-
-
-
-
-# --- Calculate IPCW-scheme weight from Graf1999 for a given time period t
-tBrier <- function(tVal) {
-  # Testing conditions:
-  #tVal <- 12
-  
-  # - Calculate IPC-weight conditionally from Graf1999
-  # 1) if subject i is still at risk at t, then 1/G(t);
-  # 2) if subject i had an event before or at t, then 1/G(T_i) . \delta_t
-  # 3) If subject was censored before t, then 0
-  datCredit[, Weight_w := fifelse(PerfSpell_Age > tVal, 1/G_hat(tVal),
-                                 fifelse(PerfSpell_Age <= tVal & PerfSpellResol_Type_Hist=="Defaulted", 1/G_hat(PerfSpell_Age),
-                                        0)), by=list(PerfSpell_Key)]
-  
-  # - Subset to given tVal and calculate tBS
-  datT <- subset(datCredit, TimeInPerfSpell == tVal & Weight_w > 0)
-  datT[, y_t := as.integer(PerfSpell_Age > tVal)]
-  tBS <- mean(datT$Weight_w*(datT$y_t - datT$Survival)^2, na.rm=T)
-  return(tBS)
-}
-
-
-vecTBS <- sapply(1:3, function(i) tBrier(tVal=i))
-# integrated tBS score
-mean(vecTBS)
-
-plot(vecTBS, type="b")
 

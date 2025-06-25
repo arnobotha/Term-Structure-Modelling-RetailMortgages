@@ -17,6 +17,8 @@
 #   - 3b.Data_Fusion2_PWP_ST.R
 #   - 5a(i).CoxPropHaz_PWP_Advanced.R
 #   - 5a(i).CoxPropHaz_PWP_Basic.R
+#   - 5b(i).CoxDiscreteTime_Advanced.R
+#   - 5b(ii).CoxDiscreteTime_Basic.R
 
 # -- Inputs:
 #   - datCredit_train_TFD | Prepared from script 3b
