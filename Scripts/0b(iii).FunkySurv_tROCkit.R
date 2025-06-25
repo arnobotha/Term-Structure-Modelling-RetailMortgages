@@ -475,14 +475,18 @@ tROC.multi <- function(datGiven, modGiven, month_Start=0, month_End, sLambda=0.0
   # datGiven = copy(dat); cox=coxExample; month_End=203; numDigits=2; Graph=TRUE; month_Start=0; estMethod="NN-0/1";sLambda=0.05;
   # fld_ID="ID"; fld_Event="Event_Ind"; fld_StartTime="Start"; fld_EndTime="End"; caseStudyName="Main"
   # graphName="coxExample_cgd"; eventVal=1; genFigPathGiven=paste0(genFigPath, "/TFD"); numThreads=6; reportFlag=T; 
-  # logPath=paste0(getwd(),"/")
+  # logPath=paste0(getwd(),"/"); predType="exp"
   # -- Testing conditions 2 (real-world data)
   # datGiven = copy(datCredit_valid_TFD); cox=cox_TFD; month_End=12; numDigits=0; Graph=TRUE; month_Start=0; estMethod="NN-0/1";sLambda=0.05;
   # fld_ID="PerfSpell_Key"; fld_Event="PerfSpell_Event"; eventVal=1; fld_StartTime="Start"; fld_EndTime="End";
   # graphName="DefaultSurvModel-Cox1_Depedendence"; genFigPathGiven=paste0(genFigPath, "/TFD"); numThreads=6; reportFlag=T; caseStudyName="Main"
-  # logPath=genPath
-  # -- Testing conditions 3 (real-world Cox Proportional Odds model)
-  # modGiven=modLR
+  # logPath=genPath; predType="exp"
+  # -- Testing conditions 3 (real-world Cox Proportional Odds / Discrete-time model)
+  # datGiven=datCredit_valid; modGiven=modLR; month_End=predictTime; sLambda=0.05; estMethod="NN-0/1"; numDigits=4 
+  # fld_ID="PerfSpell_Key"; fld_Event="PerfSpell_Event"; eventVal=1; fld_StartTime="Start"; fld_EndTime="TimeInPerfSpell";
+  # graphName="ROC_CoxDisc_Basic_TimeVar"; genFigPathGiven=paste0(genFigPath, "tROC-Analyses/");
+  # caseStudyName=paste0("CoxDisc_PWPST_", predictTime); numThreads=12; logPath=genPath
+  # month_Start=0; Graph=T; predType="response"; reportFlag=T
   
   
   # -- Error handling
@@ -492,7 +496,7 @@ tROC.multi <- function(datGiven, modGiven, month_Start=0, month_End, sLambda=0.0
   if (!any( class(modGiven) %in% c("coxph","lm","glm"))) {
     stop("[modGiven] must be a valid 'coxph' or 'glm' model object.\n")
   }# Test whether [cox] is a coxph model
-  if (!all(all.vars(formula(cox)) %in% colnames(datGiven))){
+  if (!all(all.vars(formula(modGiven)) %in% colnames(datGiven))){
     stop("[datGiven] does not contain the variables required within the [modGiven] object.\n")
   }# Test whether [datGiven] contains the variables on which [cox] was built
   if (!is.numeric(month_Start) || !is.numeric(month_End)) {
@@ -511,7 +515,8 @@ tROC.multi <- function(datGiven, modGiven, month_Start=0, month_End, sLambda=0.0
     stop("The graphing arguments [graphName] and [genFigPathGiven] cannot be missing and must be specified when desiring an ROC-graph. \n")
   }
   
-  
+  # - Create shallow copy
+  datGiven <- copy(datGiven)
   
   # -- Obtain Markers/prediction scores M_i for i=1,...,n cases (not necessarily subjects) and assign as thresholds
   # - Score the given dataset using the given Cox regression model towards obtaining marker 
@@ -758,7 +763,7 @@ tROC.multi <- function(datGiven, modGiven, month_Start=0, month_End, sLambda=0.0
                      color = "grey", linewidth=1) +
         annotate("label", x = c(0.75,0.75), y = c(0.375,0.125),label = 
                    c(paste0("AUC(",month_Start,",", month_End,"): ", percent(sArea, accuracy=0.01)),
-                     paste0("Harrell's c-statistic: ", conc)), fill="grey", family=chosenFont) + 
+                     paste0("Concordance-statistic: ", conc)), fill="grey", family=chosenFont) + 
         scale_y_continuous(label=percent) + scale_x_continuous(label=percent)
       
       # Save graph

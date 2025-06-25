@@ -70,17 +70,20 @@ corrAnalysis <- function(data_train, variables, corrThresh = 0.6, method = 'spea
 #         [variables]: List of variables used to build single-factor models;
 TimeDef_Form <- function(TimeDef, variables, strataVar=""){
   # Create formula based on time definition of the dataset.
-  if(TimeDef=="TFD"){# Formula for time to first default time definition (containing only the fist performance spell).
+  if(TimeDef[1]=="TFD"){# Formula for time to first default time definition (containing only the fist performance spell).
     formula <- as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ ",
                                  paste(variables,collapse=" + ")))
     
-  } else if(TimeDef=="AG"){# Formula for Andersen-Gill (AG) time definition
+  } else if(TimeDef[1]=="AG"){# Formula for Andersen-Gill (AG) time definition
     formula <- as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ PerfSpell_Num + ",
                                  paste(variables,collapse=" + ")))
     
-  } else if(TimeDef=="PWPST"){# Formula for Prentice-Williams-Peterson (PWP) Spell time definition
+  } else if(TimeDef[1]=="PWPST"){# Formula for Prentice-Williams-Peterson (PWP) Spell time definition
     formula <- as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ strata(", strataVar, ") + ",
                                  paste(variables,collapse=" + ")))
+  } else if(TimeDef[1]=="Cox_Discrete") { # Formula for a discrete-time Cox model (for use in glm())
+      formula <- as.formula(paste0(TimeDef[2], " ~ ",
+                                   paste(variables,collapse=" + ")))
   } else {stop("Unkown time definition")}
   
   return(formula)
@@ -93,12 +96,18 @@ TimeDef_Form <- function(TimeDef, variables, strataVar=""){
 #         [data_valid]: Validation data; [variables]: List of variables used to build single-factor models;
 #         [it]: Number of variables being compared; [logPath], Optional path for log file for logging purposes;
 #         [fldSpellID]: Field name of spell-level ID.
-calc_AIC <- function(formula, data_train, variables="", it=NA, logPath="", fldSpellID="PerfSpell_Key") {
+#         [modelType]: Specifying either a coxph object to be fit, or glm
+calc_AIC <- function(formula, data_train, variables="", it=NA, logPath="", 
+                     fldSpellID="PerfSpell_Key", modelType="Cox") {
   # - Testing conditions
   # j <- 1; formula=TimeDef_Form(TimeDef,variables[j], strataVar=strataVar); 
   
   tryCatch({
-    model <- coxph(formula,id=get(fldSpellID), data = data_train) # Fit Cox model
+    if (modelType=="Cox") {
+      model <- coxph(formula,id=get(fldSpellID), data = data_train) # Fit Cox model 
+    } else if (modelType=="Cox_Discrete") {
+      model <- glm(formula,data = data_train, family="binomial") # Fit discrete-time Cox model 
+    } else stop("Unknown model type in calc_AIC().")
     
     if (!is.na(it)) {# Output the number of models built, where the log is stored in a text file afterwards.
       cat(paste0("\n\t ", it,") Single-factor survival model built. "),
@@ -108,7 +117,12 @@ calc_AIC <- function(formula, data_train, variables="", it=NA, logPath="", fldSp
     AIC <- AIC(model) # Calculate AIC of the model.
     
     # Return results as a data.table
-    return(data.table(Variable = variables, AIC = AIC, pValue=summary(model)$coefficients[5]))
+    if (modelType=="Cox") {
+      return(data.table(Variable = variables, AIC = AIC, pValue=summary(model)$coefficients[5]))
+    } else if (modelType=="Cox_Discrete") {
+      return(data.table(Variable = variables, AIC = AIC, pValue=summary(model)$coefficients[1,4]))
+    }
+    
     
   }, error=function(e) {
     AIC <- Inf
@@ -128,7 +142,7 @@ calc_AIC <- function(formula, data_train, variables="", it=NA, logPath="", fldSp
 #         [numThreads]: Number of threads used; [genPath]: Optional path for log file. 
 # Output: [matResults]: Result matrix.
 aicTable <- function(data_train, variables, fldSpellID="PerfSpell_Key",
-                      TimeDef, numThreads=6, genPath, strataVar="") {
+                      TimeDef, numThreads=6, genPath, strataVar="", modelType="Cox") {
   # - Testing conditions
    # data_train <- datCredit_train; TimeDef="PWPST"; numThreads=6
    # fldSpellID<-"PerfSpell_Key"; variables<-"g0_Delinq_SD_4"; strataVar="PerfSpell_Num_binned"
@@ -145,7 +159,7 @@ aicTable <- function(data_train, variables, fldSpellID="PerfSpell_Key",
       # - Testing conditions
       # j <- 1
       calc_AIC(formula=TimeDef_Form(TimeDef,variables[j], strataVar=strataVar), variables=variables[j],
-                    data_train=data_train, it=j, logPath=genPath,  fldSpellID=fldSpellID)
+                    data_train=data_train, it=j, logPath=genPath,  fldSpellID=fldSpellID, modelType=modelType)
       } # ----------------- End of Inner Loop -----------------
   stopCluster(cl.port); proc.time() - ptm  
   
@@ -163,11 +177,16 @@ aicTable <- function(data_train, variables, fldSpellID="PerfSpell_Key",
 #         [data_valid]: Validation data; [variables]: List of variables used to build single-factor models;
 #         [it]: Number of variables being compared; [logPath], Optional path for log file for logging purposes;
 #         [fldSpellID]: Field name of spell-level ID.
-calc_HarrellC <- function(formula, data_train, data_valid, variables="", it=NA, logPath="", fldSpellID="PerfSpell_Key") {
+calc_conc <- function(formula, data_train, data_valid, variables="", it=NA, logPath="", 
+                      fldSpellID="PerfSpell_Key", modelType="Cox") {
   # formula <- TimeDef_Form(TimeDef,variables[j], strataVar=strataVar)
   
   tryCatch({
-    model <- coxph(formula,id=get(fldSpellID), data = data_train) # Fit Cox model
+    if (modelType=="Cox") {
+      model <- coxph(formula,id=get(fldSpellID), data = data_train) # Fit Cox model 
+    } else if (modelType=="Cox_Discrete"){
+      model <- glm(formula,data = data_train, family="binomial") # Fit discrete-time Cox model 
+    } else stop("Unknown model type in calc_AIC().")
     
     if (!is.na(it)) {# Output the number of models built, where the log is stored in a text file afterwards.
       cat(paste0("\n\t ", it,") Single-factor survival model built. "),
@@ -177,7 +196,9 @@ calc_HarrellC <- function(formula, data_train, data_valid, variables="", it=NA, 
     c <- concordance(model, newdata=data_valid) # Calculate concordance of the model based on the validation set.
     conc <- as.numeric(c[1])# Extract concordance
     sd <- sqrt(c$var)# Extract concordance variability as a standard deviation
-    lr_stat <- round(2 * (model$loglik[2] - model$loglik[1]),0)# Extract LRT from the model's log-likelihood
+    if (modelType=="Cox") {
+      lr_stat <- round(2 * (model$loglik[2] - model$loglik[1]),0)# Extract LRT from the model's log-likelihood 
+    } else lr_stat <- NA
     
     # Return results as a data.table
     return(data.table(Variable = variables, Concordance = conc, SD = sd, LR_Statistic = lr_stat))
@@ -187,7 +208,7 @@ calc_HarrellC <- function(formula, data_train, data_valid, variables="", it=NA, 
     lr_stat <- NA
     if (!is.na(it)) {
       cat(paste0("\n\t ", it,") Single-factor survival model failed. "),
-          file=paste0(logPath,"HarrelsC_log.txt"), append=T)
+          file=paste0(logPath,"Concordance_log.txt"), append=T)
     }
     return(data.table(Variable = variables, Concordance = conc, SD = sd, LR_Statistic = lr_stat)) 
   })
@@ -195,13 +216,13 @@ calc_HarrellC <- function(formula, data_train, data_valid, variables="", it=NA, 
 
 
 
-# --- Function to extract the concordances (Harrell's C) from single-factor models
+# --- Function to extract the concordances (Harrell's C for Cox PH) from single-factor models
 # Input:  [data_train]: Training data; [data_valid]: Validation data;
 #         [variables]: List of variables used to build single-factor models;
 #         [fldSpellID]: Field name of spell-level ID; [TimeDef]: Time definition incorporated.
 # Output: [matResults]: Result matrix.
 concTable <- function(data_train, data_valid, variables, fldSpellID="PerfSpell_Key",
-                      TimeDef, numThreads=6, genPath, strataVar="") {
+                      TimeDef, numThreads=6, genPath, strataVar="", modelType="Cox") {
   # - Testing conditions
   # data_valid <- datCredit_train_PWPST; TimeDef="PWPST"; numThreads=6
   # fldEventInd<-"Default_Ind"
@@ -210,15 +231,16 @@ concTable <- function(data_train, data_valid, variables, fldSpellID="PerfSpell_K
   ptm <- proc.time() #IGNORE: for computation time calculation
   cl.port <- makeCluster(round(numThreads)); registerDoParallel(cl.port) # multi-threading setup
   cat("New Job: Estimating B-statistic (1-KS) for each variable as a single-factor survival model ..",
-      file=paste0(genPath,"HarrelsC_log.txt"), append=F)
+      file=paste0(genPath,"Concordance_log.txt"), append=F)
   
   results <- foreach(j=1:length(variables), .combine='rbind', .verbose=F, .inorder=T,
-                                 .packages=c('data.table', 'survival'), .export=c('calc_HarrellC', 'TimeDef_Form')) %dopar%
+                                 .packages=c('data.table', 'survival'), .export=c('calc_conc', 'TimeDef_Form')) %dopar%
     { # ----------------- Start of Inner Loop -----------------
       # - Testing conditions
       # j <- 1
-      calc_HarrellC(formula=TimeDef_Form(TimeDef,variables[j], strataVar=strataVar), variable=variables[j],
-                    data_train=data_train, data_valid=data_valid, it=j, logPath=genPath,  fldSpellID=fldSpellID)
+      calc_conc(formula=TimeDef_Form(TimeDef,variables[j], strataVar=strataVar), variable=variables[j],
+                    data_train=data_train, data_valid=data_valid, it=j, logPath=genPath, 
+                fldSpellID=fldSpellID, modelType=modelType)
     } # ----------------- End of Inner Loop -----------------
   stopCluster(cl.port); proc.time() - ptm  
   

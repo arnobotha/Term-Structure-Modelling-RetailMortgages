@@ -552,7 +552,6 @@ if (doDescribe) describe(datCredit_smp$g0_Delinq_Ave); hist(datCredit_smp$g0_Del
 # bounded by [0.04357, 0.12998] for 5%-95% percentiles; no outliers
 
 
-
 # - Create a lagged version of the aggregated default rate created in script 2f
 dat_DefaultRate <- datCredit_smp[!duplicated(Date),list(Date,DefaultStatus1_Aggr_Prop)]
 # Applying various lags
@@ -680,7 +679,6 @@ suppressWarnings(rm(dat_IRM_Aggr, dat_IRM_Aggr_Check1, list_merge_variables, res
 
 
 
-
 # --- 9. Macroeconomic feature engineering
 
 # - Confirm that required data objects are loaded into memory
@@ -742,12 +740,41 @@ cat( (length(which(results_missingness > 0)) == 0) %?% "SAFE: No missingness, fu
        "WARNING: Missingness in certain macroecnomic fields detected, fusion compromised.\n")
 ### RESULTS: No missingness observed, continue with packing away the data
 
+# - Cleanup
+rm(datMV, list_merge_variables, results_missingness, datMV_Check1, datMV_Check2); gc()
+
+
+
+# --- 10. Model-based feature engineering
+
+# - Create binned version of TimeInPerfSpell for discrete-time hazard models
+timeBinning <- function(x) {
+  case_when(
+    0 < x & x <= 3 ~ "01.[1,3]", 3 < x & x <= 6 ~ "02.(3,6]",
+    6 < x & x <= 9 ~ "03.(6,9]", 9 < x & x <= 12 ~ "04.(9,12]",
+    12 < x & x <= 18 ~ "05.(12,18]", 18 < x & x <= 24 ~ "06.(18,24]",
+    24 < x & x <= 30 ~ "07.(24,30]", 30 < x & x <= 36 ~ "08.(30,36]",
+    36 < x & x <= 48 ~ "09.(36,48]", 48 < x & x <= 60 ~ "10.(48,60]",
+    60 < x & x <= 72 ~ "11.(60,72]", 72 < x & x <= 84 ~ "12.(72,84]",
+    84 < x & x <= 96 ~ "13.(84,96]", 84 < x & x <= 96 ~ "14.(84,96]",
+    96 < x & x <= 108 ~ "15.(96,108]", 108 < x & x <= 120 ~ "16.(108,120]",
+    120 < x & x <= 144 ~ "17.(120,144]", 144 < x & x <= 168 ~ "18.(144,168]",
+    168 < x & x <= 192 ~ "19.(168,192]",TRUE ~ "20.193+"
+  )
+}
+datCredit_smp[, Time_Binned := timeBinning(TimeInPerfSpell)]
+table(datCredit_smp$Time_Binned) %>% prop.table()
+### RESULTS: Between 3% and 7% of observations in each bin; deemed appropriate, particulalarly in
+# capturing the earlier time periods (shorter interval bins).
+
+# Lag g0-delinq with appropriate period for discrete-time hazard model
+datCredit_smp[, g0_Delinq_Lag_1 := shift(g0_Delinq,fill=0),by=LoanID]
+
+# - Create start point variable
+datCredit_smp[, Start := TimeInPerfSpell - 1]
 
 # -- Save fused- and enriched subsampled dataset for quick disk-based retrieval later
 pack.ffdf(paste0(genPath,"creditdata_final_PWPST_smp2"), datCredit_smp)
-
-# - Cleanup
-rm(datMV, list_merge_variables, results_missingness, datMV_Check1, datMV_Check2); gc()
 
 
 

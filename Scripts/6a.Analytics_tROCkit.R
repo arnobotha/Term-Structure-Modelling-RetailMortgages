@@ -48,14 +48,15 @@ datCredit_valid[, Start := TimeInPerfSpell - 1]
 
 
 
-# ----------------- 2. Fit a Cox regression model on the resampled prepared data
+# ----------------- 2a. Fit a Cox regression model on the resampled prepared data
 
 
-# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Basic
+# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Basic Cox-regression model
 # - Initialize variables
 vecVars_PWPST_bas <- c("Arrears", "InterestRate_Nom")
 
-# - Build model based on variables
+# - Fit a Cox Proportional Hazards model with time-varying covariates, and clustered observations
+# NOTE: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 cox_PWPST_basic <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ ", 
                                            paste(vecVars_PWPST_bas,collapse=" + "), 
                                            " + strata(PerfSpell_Num_binned)")),
@@ -64,7 +65,7 @@ summary(cox_PWPST_basic); AIC(cox_PWPST_basic); concordance(cox_PWPST_basic)
 
 
 
-# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Advanced
+# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Advanced Cox-regression model
 # - Initialize variables
 vecVars_PWPST_adv <- c( # Delinquency-themed
   "g0_Delinq_SD_4", "slc_acct_roll_ever_24_imputed_mean", "g0_Delinq_Ave", "Arrears", "PerfSpell_Num",
@@ -75,8 +76,8 @@ vecVars_PWPST_adv <- c( # Delinquency-themed
   # Macroeconomic variables
   "M_DTI_Growth_9", "M_Inflation_Growth_6", "M_Repo_Rate_6")
 
-# # Fit a Cox Proportional Hazards model with time-varying covariates, and clustered observations
-# # NOTE: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
+# - Fit a Cox Proportional Hazards model with time-varying covariates, and clustered observations
+# NOTE: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 cox_PWPST_adv <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ ", 
                                          paste(vecVars_PWPST_adv,collapse=" + "), 
                                      " + strata(PerfSpell_Num_binned)")),
@@ -86,130 +87,165 @@ summary(cox_PWPST_adv); AIC(cox_PWPST_adv); concordance(cox_PWPST_adv)
 
 
 
+# ----------------- 2b. Fit a discrete-time hazard model on the resampled prepared data
+
+
+# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Basic discrete-time hazard model
+# - Initialize variables
+vars_basic <- c("-1", "Time_Binned", "log(TimeInPerfSpell):PerfSpell_Num_binned",
+                "Arrears", "InterestRate_Nom", "M_Inflation_Growth_6")
+
+# - Fit discrete-time hazard model with selected variables
+modLR_basic <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars_basic, collapse = " + "))),
+                    data=datCredit_train, family="binomial")
+
+
+
+# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Advanced discrete-time hazard model
+# - Initialize variables
+vars <- c("-1", "Time_Binned*PerfSpell_Num_binned", #"log(TimeInPerfSpell):PerfSpell_Num_binned",
+          "g0_Delinq_SD_4", "g0_Delinq_Lag_1", "slc_acct_arr_dir_3", "slc_acct_roll_ever_24_imputed_mean",
+          "AgeToTerm_Aggr_Mean", "InstalmentToBalance_Aggr_Prop", "NewLoans_Aggr_Prop",
+          "pmnt_method_grp", "InterestRate_Nom", "BalanceToPrincipal",
+          "M_Inflation_Growth_6","M_DTI_Growth")
+
+# - Fit discrete-time hazard model with selected variables
+modLR <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars, collapse = " + "))),
+                    data=datCredit_train, family="binomial")
+
+
+
 
 # ----------------- 3. Conduct & compare ROC-analyses at fixed prediction time
-# NOTE: ROC-analyses are conducted using the same fitted Cox model at a specific prediction time t
+# NOTE: ROC-analyses are conducted using the same fitted model but at specific prediction times t
 
-# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Basic
+# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Basic Cox-regression model
 
 # --- Package: tROCkit() | custom "package"/function
 # NOTE: Using custom tROC()-function from script 0b(iii) under the CD-approach with an NN-estimator and 0/1-kernel
 
 
-# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
+# -- Multi-threaded calculation of the AUC from given start up to given prediction time 3 in following the CD-approach
 # NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 3
 objROC1_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                                 fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
-                                graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPath=paste0(genFigPath), 
+                                graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPathGiven=paste0(genFigPath,"/tROC-Analyses/"), 
                                 caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
 objROC1_PWPST_bas$AUC; objROC1_PWPST_bas$ROC_graph
 proc.time() - ptm
 ### RESULTS: AUC up to t: 96.01%, achieved in 201.11 secs
 
 
-# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 12 in following the CD-approach
+# -- Multi-threaded calculation of the AUC from given start up to given prediction time 12 in following the CD-approach
 # NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 12
 objROC2_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4,
                                 fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
-                                graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPath=paste0(genFigPath),
+                                graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPathGiven=paste0(genFigPath,"/tROC-Analyses/"),
                                 caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
 objROC2_PWPST_bas$AUC; objROC2_PWPST_bas$ROC_graph
 proc.time() - ptm
 ### RESULTS: AUC up to t: 93.05%, achieved in 346.30  secs
 
 
-# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 36 in following the CD-approach
+# -- Multi-threaded calculation of the AUC from given start up to given prediction time 36 in following the CD-approach
 # NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 24
 objROC3_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                                 fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
-                                graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPath=paste0(genFigPath), 
+                                graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPathGiven=paste0(genFigPath,"/tROC-Analyses/"), 
                                 caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
 objROC3_PWPST_bas$AUC; objROC3_PWPST_bas$ROC_graph
 proc.time() - ptm
 ### RESULTS: AUC up to t: 93.33%, achieved in 535.03  secs
 
 
-# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 36 in following the CD-approach
+# -- Multi-threaded calculation of the AUC from given start up to given prediction time 36 in following the CD-approach
 # NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 36
 objROC4_PWPST_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                                 fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
-                                graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPath=paste0(genFigPath), 
+                                graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_bas", genFigPathGiven=paste0(genFigPath,"/tROC-Analyses/"), 
                                 caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
 objROC4_PWPST_bas$AUC; objROC4_PWPST_bas$ROC_graph
 proc.time() - ptm
 ### RESULTS: AUC up to t: 93.21%, achieved in 730.53  secs
 
 
+# -- Store experimental objects | Memory optimisation
+# PWPST-model: Basic Cox-regression model
+pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_03_bas"), objROC1_PWPST_bas);
+pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_12_bas"), objROC2_PWPST_bas);
+pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_24_bas"), objROC3_PWPST_bas);
+pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_36_bas"), objROC4_PWPST_bas);
 
 
-# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Advanced
+
+# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Advanced Cox-regression model
 
 # --- Package: tROCkit() | custom "package"/function
 # NOTE: Using custom tROC()-function from script 0b(iii) under the CD-approach with an NN-estimator and 0/1-kernel
 
 
-# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
+# -- Multi-threaded calculation of the AUC from given start up to given prediction time 3 in following the CD-approach
 # NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 3
 objROC1_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                           fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
-                          graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPath=paste0(genFigPath), 
+                          graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPathGiven=paste0(genFigPath,"/tROC-Analyses/"), 
                           caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
 objROC1_PWPST_adv$AUC; objROC1_PWPST_adv$ROC_graph
 proc.time() - ptm
 ### RESULTS: AUC up to t: 96.19%, achieved in 712.29 secs ( 11.9 mins)
 
 
-# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 12 in following the CD-approach
+# -- Multi-threaded calculation of the AUC from given start up to given prediction time 12 in following the CD-approach
 # NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 12
 objROC2_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4,
                           fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
-                          graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPath=paste0(genFigPath),
+                          graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPathGiven=paste0(genFigPath,"/tROC-Analyses/"),
                           caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
 objROC2_PWPST_adv$AUC; objROC2_PWPST_adv$ROC_graph
 proc.time() - ptm
 ### RESULTS: AUC up to t: 96.24%, achieved in 1370.21 secs (22.8 mins)
 
 
-# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 36 in following the CD-approach
+# -- Multi-threaded calculation of the AUC from given start up to given prediction time 36 in following the CD-approach
 # NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 24
 objROC3_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                           fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
-                          graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPath=paste0(genFigPath), 
+                          graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPathGiven=paste0(genFigPath,"/tROC-Analyses/"), 
                           caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
 objROC3_PWPST_adv$AUC; objROC3_PWPST_adv$ROC_graph
 proc.time() - ptm
 ### RESULTS: AUC up to t: 96.33%, achieved in 2264.65 secs (37.7 mins)
 
 
-# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 36 in following the CD-approach
+# -- Multi-threaded calculation of the AUC from given start up to given prediction time 36 in following the CD-approach
 # NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
 # NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
 ptm <- proc.time() #IGNORE: for computation time calculation;
 predictTime <- 36
 objROC4_PWPST_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=cox_PWPST_adv, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
                           fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
-                          graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPath=paste0(genFigPath), 
+                          graphName="DefaultSurvModel-Cox-PWPST-ROC_Depedendence_adv", genFigPathGiven=paste0(genFigPath,"/tROC-Analyses/"), 
                           caseStudyName=paste0("PWPST_", predictTime), numThreads=12, logPath=genPath)
 objROC4_PWPST_adv$AUC; objROC4_PWPST_adv$ROC_graph
 proc.time() - ptm
@@ -217,13 +253,7 @@ proc.time() - ptm
 
 
 # -- Store experimental objects | Memory optimisation
-# PWPST-model: Basicc
-pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_03_bas"), objROC1_PWPST_bas);
-pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_12_bas"), objROC2_PWPST_bas);
-pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_24_bas"), objROC3_PWPST_bas);
-pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_36_bas"), objROC4_PWPST_bas);
-
-# PWPST-model: Advanced
+# PWPST-model: Advanced Cox-regression model
 pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_03_adv"), objROC1_PWPST_adv);
 pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_12_adv"), objROC2_PWPST_adv);
 pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_24_adv"), objROC3_PWPST_adv);
@@ -232,10 +262,160 @@ pack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_36_adv"), 
 
 
 
+# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Basic discrete-time hazard model
+
+# --- Package: tROCkit() | custom "package"/function
+# NOTE: Using custom tROC()-function from script 0b(iii) under the CD-approach with an NN-estimator and 0/1-kernel
+
+# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
+# NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
+# NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
+ptm <- proc.time() #IGNORE: for computation time calculation;
+predictTime <- 3
+objROC1_PWPST_CoxDisc_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+                                       fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
+                                       graphName="DefaultSurvModel-ROC_CoxDisc_Basic_TimeVar", genFigPathGiven=paste0(genFigPath, "tROC-Analyses/"), 
+                                       caseStudyName=paste0("CoxDisc_PWPST_", predictTime), numThreads=12, logPath=genPath, 
+                                       predType="response")
+objROC1_PWPST_CoxDisc_bas$AUC; objROC1_PWPST_CoxDisc_bas$ROC_graph
+proc.time() - ptm
+### RESULTS: AUC up to t: 93.37%, achieved in 374.31 secs
+
+
+# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
+# NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
+# NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
+ptm <- proc.time() #IGNORE: for computation time calculation;
+predictTime <- 12
+objROC2_PWPST_CoxDisc_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+                                       fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
+                                       graphName="DefaultSurvModel-ROC_CoxDisc_Basic_TimeVar", genFigPathGiven=paste0(genFigPath, "tROC-Analyses/"), 
+                                       caseStudyName=paste0("CoxDisc_PWPST_", predictTime), numThreads=12, logPath=genPath, 
+                                       predType="response")
+objROC2_PWPST_CoxDisc_bas$AUC; objROC2_PWPST_CoxDisc_bas$ROC_graph
+proc.time() - ptm
+### RESULTS: AUC up to t: 94.34%, achieved in  767.13 secs
+
+
+# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
+# NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
+# NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
+ptm <- proc.time() #IGNORE: for computation time calculation;
+predictTime <- 24
+objROC3_PWPST_CoxDisc_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+                                       fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
+                                       graphName="DefaultSurvModel-ROC_CoxDisc_Basic_TimeVar", genFigPathGiven=paste0(genFigPath, "tROC-Analyses/"), 
+                                       caseStudyName=paste0("CoxDisc_PWPST_", predictTime), numThreads=12, logPath=genPath, 
+                                       predType="response")
+objROC3_PWPST_CoxDisc_bas$AUC; objROC3_PWPST_CoxDisc_bas$ROC_graph
+proc.time() - ptm
+### RESULTS: AUC up to t: 94.41%, achieved in 1267.45 secs
+
+
+# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
+# NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
+# NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
+ptm <- proc.time() #IGNORE: for computation time calculation;
+predictTime <- 36
+objROC4_PWPST_CoxDisc_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR_basic, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+                                       fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
+                                       graphName="DefaultSurvModel-ROC_CoxDisc_Basic_TimeVar", genFigPathGiven=paste0(genFigPath, "tROC-Analyses/"), 
+                                       caseStudyName=paste0("CoxDisc_PWPST_", predictTime), numThreads=12, logPath=genPath, 
+                                       predType="response")
+objROC4_PWPST_CoxDisc_bas$AUC; objROC4_PWPST_CoxDisc_bas$ROC_graph
+proc.time() - ptm
+### RESULTS: AUC up to t: 94.16%, achieved in 1762.33 secs
+
+
+# -- Store experimental objects | Memory optimisation
+# PWPST-model: Basic Cox-regression model
+pack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_03_bas"), objROC1_PWPST_CoxDisc_bas);
+pack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_12_bas"), objROC2_PWPST_CoxDisc_bas);
+pack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_24_bas"), objROC3_PWPST_CoxDisc_bas);
+pack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_36_bas"), objROC4_PWPST_CoxDisc_bas);
+
+
+
+
+# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Advanced discrete-time hazard model
+
+# --- Package: tROCkit() | custom "package"/function
+# NOTE: Using custom tROC()-function from script 0b(iii) under the CD-approach with an NN-estimator and 0/1-kernel
+
+# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
+# NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
+# NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
+ptm <- proc.time() #IGNORE: for computation time calculation;
+predictTime <- 3
+objROC1_PWPST_CoxDisc_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+                                        fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
+                                        graphName="DefaultSurvModel-ROC_CoxDisc_Advanced_TimeVar", genFigPathGiven=paste0(genFigPath, "tROC-Analyses/"), 
+                                        caseStudyName=paste0("CoxDisc_PWPST_", predictTime), numThreads=12, logPath=genPath, 
+                                        predType="response")
+objROC1_PWPST_CoxDisc_adv$AUC; objROC1_PWPST_CoxDisc_adv$ROC_graph
+proc.time() - ptm
+### RESULTS: AUC up to t: 98.05%, achieved in 569.43  secs
+
+
+# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
+# NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
+# NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
+ptm <- proc.time() #IGNORE: for computation time calculation;
+predictTime <- 12
+objROC2_PWPST_CoxDisc_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+                                        fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
+                                        graphName="DefaultSurvModel-ROC_CoxDisc_Advanced_TimeVar", genFigPathGiven=paste0(genFigPath, "tROC-Analyses/"), 
+                                        caseStudyName=paste0("CoxDisc_PWPST_", predictTime), numThreads=12, logPath=genPath, 
+                                        predType="response")
+objROC2_PWPST_CoxDisc_adv$AUC; objROC2_PWPST_CoxDisc_adv$ROC_graph
+proc.time() - ptm
+### RESULTS: AUC up to t: 98.12%, achieved in 1080.99 secs
+
+
+# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
+# NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
+# NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
+ptm <- proc.time() #IGNORE: for computation time calculation;
+predictTime <- 24
+objROC3_PWPST_CoxDisc_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+                                        fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
+                                        graphName="DefaultSurvModel-ROC_CoxDisc_Advanced_TimeVar", genFigPathGiven=paste0(genFigPath, "tROC-Analyses/"), 
+                                        caseStudyName=paste0("CoxDisc_PWPST_", predictTime), numThreads=12, logPath=genPath, 
+                                        predType="response")
+objROC3_PWPST_CoxDisc_adv$AUC; objROC3_PWPST_CoxDisc_adv$ROC_graph
+proc.time() - ptm
+### RESULTS: AUC up to t: 98.16%, achieved in 1755.98 secs
+
+
+# -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
+# NOTE: Uses the superior Nearest Neighbour Estimator (NNE) method for S(t) with a 0/1-kernelNNE-kernel for S(t)
+# NOTE2: Assume dependence (by specifying ID-field) amongst certain observations clustered around ID-values
+ptm <- proc.time() #IGNORE: for computation time calculation;
+predictTime <- 36
+objROC4_PWPST_CoxDisc_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR, month_End=predictTime, sLambda=0.05, estMethod="NN-0/1", numDigits=4, 
+                                        fld_ID="PerfSpell_Key", fld_Event="PerfSpell_Event", eventVal=1, fld_StartTime="Start", fld_EndTime="TimeInPerfSpell",
+                                        graphName="DefaultSurvModel-ROC_CoxDisc_Advanced_TimeVar", genFigPathGiven=paste0(genFigPath, "tROC-Analyses/"), 
+                                        caseStudyName=paste0("CoxDisc_PWPST_", predictTime), numThreads=12, logPath=genPath, 
+                                        predType="response")
+objROC4_PWPST_CoxDisc_adv$AUC; objROC4_PWPST_CoxDisc_adv$ROC_graph
+proc.time() - ptm
+### RESULTS: AUC up to t: 98.19%, achieved in 2494.16 secs
+
+
+# -- Store experimental objects | Memory optimisation
+# PWPST-model: Basic Cox-regression model
+pack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_03_adv"), objROC1_PWPST_CoxDisc_adv);
+pack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_12_adv"), objROC2_PWPST_CoxDisc_adv);
+pack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_24_adv"), objROC3_PWPST_CoxDisc_adv);
+pack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_36_adv"), objROC4_PWPST_CoxDisc_adv);
+
+
+
+
 
 # ----------------- 4. Create combined ROC-graph across multiple prediction times
 
-# ------ Prentice-Williams-Peterson (PWP) Total-time definition | Basic-model
+# ------ Prentice-Williams-Peterson (PWP) Total-time definition | Basic Cox-regression model
 
 # - Ensure required objects exist in memory
 if (!exists('objROC1_PWPST_bas')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_03_bas"), tempPath);gc()
@@ -300,13 +480,13 @@ chosenFont <- "Cambria"
 
 # - Save graph
 dpi <- 300
-ggsave(gg, file=paste0(paste0(genFigPath, "DefaultSurvModel-Cox-PWPST-CombinedROC_Depedendence_bas.png")), 
+ggsave(gg, file=paste0(paste0(genFigPath,"/tROC-Analyses/", "DefaultSurvModel-Cox-PWPST-CombinedROC_Depedendence_bas.png")), 
        width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
 
 
 
 
-# ------ Prentice-Williams-Peterson (PWP) Total-time definition | Advanced-model
+# ------ Prentice-Williams-Peterson (PWP) Total-time definition | Advanced Cox-regression model
 
 # - Ensure required objects exist in memory
 if (!exists('objROC1_PWPST_adv')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-Cox-PWPST-ROC_Depedendence_03_adv"), tempPath);gc()
@@ -371,13 +551,157 @@ chosenFont <- "Cambria"
 
 # - Save graph
 dpi <- 300
-ggsave(gg, file=paste0(paste0(genFigPath, "DefaultSurvModel-Cox-PWPST-CombinedROC_Depedendence_adv.png")), 
+ggsave(gg, file=paste0(paste0(genFigPath,"/tROC-Analyses/", "DefaultSurvModel-Cox-PWPST-CombinedROC_Depedendence_adv.png")), 
        width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
 
 
+
+
+# ------ Prentice-Williams-Peterson (PWP) Total-time definition | Basic discrete-time hazard model
+
+# - Ensure required objects exist in memory
+if (!exists('objROC1_PWPST_CoxDisc_bas')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_03_bas"), tempPath);gc()
+if (!exists('objROC2_PWPST_CoxDisc_bas')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_12_bas"), tempPath);gc()
+if (!exists('objROC3_PWPST_CoxDisc_bas')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_24_bas"), tempPath);gc()
+if (!exists('objROC4_PWPST_CoxDisc_bas')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_36_bas"), tempPath);gc()
+
+# - Set ROC-parameters and initialize data structures
+vecPercTimepoint <- c(3,12,24,36)
+vecTROC <- list(objROC1_PWPST_CoxDisc_bas, objROC2_PWPST_CoxDisc_bas, objROC3_PWPST_CoxDisc_bas, objROC4_PWPST_CoxDisc_bas)
+vLabels <- vector("list", length=length(vecPercTimepoint))
+
+# -- Create a combined data object for plotting purposes
+for (i in 1:length(vecPercTimepoint)) {
+  # i <-1 # testing condition
+  
+  # datGraph <- data.frame(x = vFPR[-(nThresh+1)], y=vTPR[-1])
+  
+  # - Create a data object for the current prediction time
+  if (i == 1) {
+    datGraph <- data.table(PredictTime=paste0(letters[i], "_", vecPercTimepoint[i]), Threshold=vecTROC[[i]]$Thresholds, 
+                           x=vecTROC[[i]]$FPR, y=vecTROC[[i]]$TPR)
+    
+  } else {
+    datGraph <- rbind(datGraph, 
+                      data.table(PredictTime= paste0(letters[i], "_", vecPercTimepoint[i]), Threshold=vecTROC[[i]]$Thresholds, 
+                                 x=vecTROC[[i]]$FPR, y=vecTROC[[i]]$TPR))
+  }
+  vLabels[[i]] <- bquote("Prediction time "*italic(t)==.(vecPercTimepoint[i])*"; AUC: "*.(percent(vecTROC[[i]]$AUC, accuracy=0.01)))
+}
+
+
+# -- Graph a combined ROC-graph across prediction times t
+# - Aesthetic parameters
+datGraph[, FacetLabel := "Basic discrete-time hazard model"]
+vCol <- brewer.pal(8,"Set1")
+vLabels_F <- setNames(vLabels, paste0(letters[1:length(vecPercTimepoint)],"_", vecPercTimepoint))
+chosenFont <- "Cambria"
+
+# - Create ROC-graph
+(gg <- ggplot(datGraph, aes(x=x,y=y,group=PredictTime)) + theme_minimal() + 
+    theme(text = element_text(family=chosenFont), legend.position="inside", 
+          strip.background=element_rect(fill="snow2", colour="snow2"),
+          strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90),
+          legend.position.inside = c(0.55,0.45),
+          legend.background = element_rect(fill="snow2", color="black",
+                                           linetype="solid", linewidth=0.1)) +
+    labs(x = bquote("False Positive Rate "*italic(F^"+")), y = 
+           bquote("True Positive Rate "*italic(T^"+"))) + 
+    # Add 45-degree line
+    geom_segment(x = 0, y = 0, xend = 1, yend = 1, color = "grey", linewidth=0.2) +
+    # Main line graph
+    geom_step(aes(x=x, y=y, linetype=PredictTime, colour=PredictTime), linewidth=0.05) + 
+    geom_point(aes(x=x, y=y, shape=PredictTime, colour=PredictTime), size=0.25) +
+    # Facets and scales
+    facet_grid(FacetLabel ~ .) +  
+    scale_color_manual(name=bquote("ROC"*(italic(t))), values=vCol, labels=vLabels) + 
+    scale_linetype_discrete(name=bquote("ROC"*(italic(t))), labels=vLabels) + 
+    scale_shape_discrete(name=bquote("ROC"*(italic(t))), labels=vLabels) + 
+    scale_y_continuous(label=percent) + scale_x_continuous(label=percent))
+
+
+# - Save graph
+dpi <- 300
+ggsave(gg, file=paste0(paste0(genFigPath,"/tROC-Analyses/", "DefaultSurvModel-CoxDisc-PWPST-CombinedROC_Depedendence_bas.png")), 
+       width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
+
+
+
+
+# ------ Prentice-Williams-Peterson (PWP) Total-time definition | Basic discrete-time hazard model
+
+# - Ensure required objects exist in memory
+if (!exists('objROC1_PWPST_CoxDisc_adv')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_03_adv"), tempPath);gc()
+if (!exists('objROC2_PWPST_CoxDisc_adv')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_12_adv"), tempPath);gc()
+if (!exists('objROC3_PWPST_CoxDisc_adv')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_24_adv"), tempPath);gc()
+if (!exists('objROC4_PWPST_CoxDisc_adv')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_36_adv"), tempPath);gc()
+
+# - Set ROC-parameters and initialize data structures
+vecPercTimepoint <- c(3,12,24,36)
+vecTROC <- list(objROC1_PWPST_CoxDisc_adv, objROC2_PWPST_CoxDisc_adv, objROC3_PWPST_CoxDisc_adv, objROC4_PWPST_CoxDisc_adv)
+vLabels <- vector("list", length=length(vecPercTimepoint))
+
+# -- Create a combined data object for plotting purposes
+for (i in 1:length(vecPercTimepoint)) {
+  # i <-1 # testing condition
+  
+  # datGraph <- data.frame(x = vFPR[-(nThresh+1)], y=vTPR[-1])
+  
+  # - Create a data object for the current prediction time
+  if (i == 1) {
+    datGraph <- data.table(PredictTime=paste0(letters[i], "_", vecPercTimepoint[i]), Threshold=vecTROC[[i]]$Thresholds, 
+                           x=vecTROC[[i]]$FPR, y=vecTROC[[i]]$TPR)
+    
+  } else {
+    datGraph <- rbind(datGraph, 
+                      data.table(PredictTime= paste0(letters[i], "_", vecPercTimepoint[i]), Threshold=vecTROC[[i]]$Thresholds, 
+                                 x=vecTROC[[i]]$FPR, y=vecTROC[[i]]$TPR))
+  }
+  vLabels[[i]] <- bquote("Prediction time "*italic(t)==.(vecPercTimepoint[i])*"; AUC: "*.(percent(vecTROC[[i]]$AUC, accuracy=0.01)))
+}
+
+
+# -- Graph a combined ROC-graph across prediction times t
+# - Aesthetic parameters
+datGraph[, FacetLabel := "Advanced discrete-time hazard model"]
+vCol <- brewer.pal(8,"Set1")
+vLabels_F <- setNames(vLabels, paste0(letters[1:length(vecPercTimepoint)],"_", vecPercTimepoint))
+chosenFont <- "Cambria"
+
+# - Create ROC-graph
+(gg <- ggplot(datGraph, aes(x=x,y=y,group=PredictTime)) + theme_minimal() + 
+    theme(text = element_text(family=chosenFont), legend.position="inside", 
+          strip.background=element_rect(fill="snow2", colour="snow2"),
+          strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90),
+          legend.position.inside = c(0.55,0.45),
+          legend.background = element_rect(fill="snow2", color="black",
+                                           linetype="solid", linewidth=0.1)) +
+    labs(x = bquote("False Positive Rate "*italic(F^"+")), y = 
+           bquote("True Positive Rate "*italic(T^"+"))) + 
+    # Add 45-degree line
+    geom_segment(x = 0, y = 0, xend = 1, yend = 1, color = "grey", linewidth=0.2) +
+    # Main line graph
+    geom_step(aes(x=x, y=y, linetype=PredictTime, colour=PredictTime), linewidth=0.05) + 
+    geom_point(aes(x=x, y=y, shape=PredictTime, colour=PredictTime), size=0.25) +
+    # Facets and scales
+    facet_grid(FacetLabel ~ .) +  
+    scale_color_manual(name=bquote("ROC"*(italic(t))), values=vCol, labels=vLabels) + 
+    scale_linetype_discrete(name=bquote("ROC"*(italic(t))), labels=vLabels) + 
+    scale_shape_discrete(name=bquote("ROC"*(italic(t))), labels=vLabels) + 
+    scale_y_continuous(label=percent) + scale_x_continuous(label=percent))
+
+
+# - Save graph
+dpi <- 300
+ggsave(gg, file=paste0(paste0(genFigPath,"/tROC-Analyses/", "DefaultSurvModel-CoxDisc-PWPST-CombinedROC_Depedendence_adv.png")), 
+       width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
+
 # - cleanup
 suppressWarnings( rm(gg, vLabels, vLabels_F, vecTROC, datGraph, dat, 
-                     objROC1_PWPST, objROC2_PWPST, objROC3_PWPST, objROC4_PWPST,
-   cox_PWPST_adv,
+                     objROC1_PWPST_bas, objROC2_PWPST_bas, objROC3_PWPST_bas, objROC4_PWPST_bas,
+                     objROC1_PWPST_adv, objROC2_PWPST_adv, objROC3_PWPST_adv, objROC4_PWPST_adv,
+   cox_PWPST_adv, cox_PWPST_basic, modLR, modLR_basic, 
+   objROC1_PWPST_CoxDisc_adv, objROC2_PWPST_CoxDisc_adv, objROC3_PWPST_CoxDisc_adv, objROC4_PWPST_CoxDisc_adv,
+   objROC1_PWPST_CoxDisc_bas, objROC2_PWPST_CoxDisc_bas, objROC3_PWPST_CoxDisc_bas, objROC4_PWPST_CoxDisc_bas,
    datCredit_train_PWPST, datCredit_valid_PWPST, datCredit_train, datCredit_valid
    ) )

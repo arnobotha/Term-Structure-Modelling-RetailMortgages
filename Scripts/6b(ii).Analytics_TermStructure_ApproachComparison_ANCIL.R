@@ -113,39 +113,61 @@ pack.ffdf(paste0(genPath,"datSurv_PWPST"), datSurv_PWPST)
 
 
 
-# --- Graphing the event density / probability mass function f(t)
+# ------- Approach 1: Graphing the event density / probability mass function f(t)
+
+# -- 1. Kaplan-Meier estimation towards constructing empirical term-structure of default risk
+
+# --- Preliminaries
+# - Create pointer to the appropriate data object 
+datCredit <- rbind(datCredit_train, datCredit_valid)
+
+
+# --- Estimate survival rate of the main event S(t) = P(T >=t) for time-to-event variable T
+# Compute Kaplan-Meier survival estimates (product-limit) for main-event | Spell-level with right-censoring & left-truncation
+km_Default <- survfit(Surv(time=TimeInPerfSpell-1, time2=TimeInPerfSpell, event=PerfSpell_Event==1, type="counting") ~ 1, 
+                      id=PerfSpell_Key, data=datCredit)
+
+# - Create survival table using surv_summary(), from the subsampled set
+(datSurv_sub <- surv_summary(km_Default)) # Survival table
+datSurv_sub <- datSurv_sub %>% rename(Time=time, AtRisk_n=`n.risk`, Event_n=`n.event`, Censored_n=`n.censor`, SurvivalProb_KM=`surv`) %>%
+  mutate(Hazard_Actual = Event_n/AtRisk_n) %>% 
+  mutate(CHaz = cumsum(Hazard_Actual)) %>% # Created as a sanity check
+  mutate(EventRate = Hazard_Actual*shift(SurvivalProb_KM, n=1, fill=1)) %>%  # probability mass function f(t)=h(t).S(t-1)
+  filter(Event_n > 0 | Censored_n >0) %>% as.data.table()
+setorder(datSurv_sub, Time)
 
 # - Confirm prepared datasets are loaded into memory
 if (!exists('datSurv_PWPST')) unpack.ffdf(paste0(genPath,"datSurv_PWPST"), tempPath);gc()
-if (!exists('datSurv')) unpack.ffdf(paste0(genPath,"datSurv_KM_MultiSpell"), tempPath);gc()
 setDT(datSurv_PWPST, key="End")
+#if (!exists('datSurv')) unpack.ffdf(paste0(genPath,"datSurv_KM_MultiSpell"), tempPath);gc()
+
 
 # - Determine population average survival and event rate across loans per time period
 datAggr <- datSurv_PWPST[, list(EventRate = mean(EventProb,na.rm=T), Freq=.N),by=list(End)]
 plot(datAggr[End <= sMaxSpellAge, End], datAggr[End <= sMaxSpellAge, EventRate], type="b")
-plot(datSurv[Time <= 300, Time], datSurv[Time <= 300, EventRate], type="b")
+plot(datSurv_sub[Time <= 300, Time], datSurv_sub[Time <= 300, EventRate], type="b")
 
 # - General parameters
-sMaxSpellAge <- 240 # max for [PerfSpell_Age], as determined in earlier analyses (script 4a(i))
-sMaxSpellAge_graph <- 240 # max for [PerfSpell_Age] for graphing purposes
+sMaxSpellAge <- 300 # max for [PerfSpell_Age], as determined in earlier analyses (script 4a(i))
+sMaxSpellAge_graph <- 300 # max for [PerfSpell_Age] for graphing purposes
 
 # - Fitting natural cubic regression splines
 sDf_Act <- 12; sDf_Exp <- 12
-smthEventRate_Act <- lm(EventRate ~ ns(Time, df=sDf_Act), data=datSurv[Time <= sMaxSpellAge,])
+smthEventRate_Act <- lm(EventRate ~ ns(Time, df=sDf_Act), data=datSurv_sub[Time <= sMaxSpellAge,])
 smthEventRate_Exp <- lm(EventRate ~ ns(End, df=sDf_Exp), data=datAggr[End <= sMaxSpellAge])
 summary(smthEventRate_Act); summary(smthEventRate_Exp)
 
 # - Render predictions based on fitted smoother, with standard errors for confidence intervals
-vPredSmth_Act <- predict(smthEventRate_Act, newdata=datSurv, se=T)
+vPredSmth_Act <- predict(smthEventRate_Act, newdata=datSurv_sub, se=T)
 vPredSmth_Exp <- predict(smthEventRate_Exp, newdata=datAggr, se=T)
 
 # - Add smoothed estimate to graphing object
-datSurv[, EventRate_spline := vPredSmth_Act$fit]
+datSurv_sub[, EventRate_spline := vPredSmth_Act$fit]
 datAggr[, EventRate_spline := vPredSmth_Exp$fit]
 
 # - Create graphing data object
-datGraph <- rbind(datSurv[,list(Time, EventRate, Type="a_Actual")],
-                  datSurv[,list(Time, EventRate=EventRate_spline, Type="b_Actual_spline")],
+datGraph <- rbind(datSurv_sub[,list(Time, EventRate, Type="a_Actual")],
+                  datSurv_sub[,list(Time, EventRate=EventRate_spline, Type="b_Actual_spline")],
                   datAggr[, list(Time=End, EventRate, Type="c_Expected")],
                   datAggr[, list(Time=End, EventRate=EventRate_spline, Type="d_Expected_spline")]
 )
@@ -162,7 +184,7 @@ vCol_Line <- brewer.pal(8, "Set1")[c(1,2)]
 mainEventName <- "Default"
 
 # - Calculate MAE between event rates
-datFusion <- merge(datSurv[Time <= sMaxSpellAge], 
+datFusion <- merge(datSurv_sub[Time <= sMaxSpellAge], 
                    datAggr[End <= sMaxSpellAge,list(Time=End, EventRate_Exp=EventRate)], by="Time")
 MAE_eventProb <- mean(abs(datFusion$EventRate - datFusion$EventRate_Exp), na.rm=T)
 
@@ -200,7 +222,7 @@ vLineType <- c("dashed", "solid", "dashed", "solid")
 
 # - Save plot
 dpi <- 180 # reset
-ggsave(gsurv_ft, file=paste0(genFigPath, "Approach1_EventProb_", mainEventName,"_SpellLevel_FirstSpell_ActVsExp.png"),
+ggsave(gsurv_ft, file=paste0(genFigPath, "Approach1_EventProb_", mainEventName,"_ActVsExp_CoxPH.png"),
        width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
 
 
@@ -266,7 +288,7 @@ survFit_pred_PWPST$surv[vOnes[2]: (vOnes[3]-1)]
 
 
 
-# --- Graphing the event density / probability mass function f(t)
+# ------ Approach 2:Graphing the event density / probability mass function f(t)
 
 # - Confirm prepared datasets are loaded into memory
 if (!exists('datSurv')) unpack.ffdf(paste0(genPath,"datSurv_KM_MultiSpell"), tempPath);gc()
@@ -345,7 +367,7 @@ vLineType <- c("dashed", "solid", "dashed", "solid")
 
 # - Save plot
 dpi <- 180 # reset
-ggsave(gsurv_ft, file=paste0(genFigPath, "Approach2_EventProb_", mainEventName,"_SpellLevel_FirstSpell_ActVsExp.png"),
+ggsave(gsurv_ft, file=paste0(genFigPath, "Approach2_EventProb_", mainEventName,"_ActVsExp_CoxPH.png"),
        width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
 
 
@@ -375,13 +397,16 @@ datCredit_valid[, Survival := exp(-CHaz)]
 datCredit_valid[, Survival_1 := shift(Survival, n=1, type="lag", fill=1), by=list(PerfSpell_Key)]
 # Calculate key survival quantities from S(t,x)
 datCredit_valid[, Hazard := (Survival_1 - Survival)/Survival_1]
-datCredit_valid[, EventRate := Survival_1 * Hazard]
+#datCredit_valid[, EventRate := Survival_1 * Hazard]
+datCredit_valid[, EventRate := Survival_1 - Survival]
 
 # Remove added cases
 datCredit_valid <- subset(datCredit_valid, Added == F)
 datCredit_valid[, Added := NULL]
 
-# --- Graphing the event density / probability mass function f(t)
+
+
+# ------ Approach 3: Graphing the event density / probability mass function f(t)
 
 # - Confirm prepared datasets are loaded into memory
 if (!exists('datSurv')) unpack.ffdf(paste0(genPath,"datSurv_KM_MultiSpell"), tempPath);gc()
@@ -468,7 +493,7 @@ vLineType <- c("dashed", "solid", "dashed", "solid")
 
 # - Save plot
 dpi <- 180 # reset
-ggsave(gsurv_ft, file=paste0(genFigPath, "Approach3_EventProb_", mainEventName,"_SpellLevel_FirstSpell_ActVsExp.png"),
+ggsave(gsurv_ft, file=paste0(genFigPath, "Approach3_EventProb_", mainEventName,"_ActVsExp_CoxPH.png"),
        width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
 
 

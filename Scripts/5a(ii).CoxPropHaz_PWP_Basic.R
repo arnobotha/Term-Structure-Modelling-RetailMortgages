@@ -1,5 +1,5 @@
-# ======================================= INPUT SPACE: Cox PH (PWP) ====================================
-# Divide data into thematic groups and perform data analysis on them to compile an input space for the TPWPST model
+# ======================================= INPUT SPACE: Cox PH (PWP) BASIC ==============================
+# Divide data into thematic groups and perform data analysis on them to compile an input space for the PWPST model
 # ------------------------------------------------------------------------------------------------------
 # PROJECT TITLE: Default survival modelling
 # SCRIPT AUTHOR(S): Dr Arno Botha (AB)
@@ -55,12 +55,13 @@ c <- coefficients(cox_PWPST_basic)
 #1:          Arrears  0.00005137344
 #2: InterestRate_Nom 14.87640164574
 
-# -Test Goodness of fit using bootstrapped B-statistics (1-KS statistic) over single-factor models
+# - Test Goodness of fit using bootstrapped B-statistics (1-KS statistic) over single-factor models
 csTable_PWPST <- csTable(datCredit_train, vars2, TimeDef="PWPST", strataVar="PerfSpell_Num_binned", seedVal=1, numIt=10,
                          fldSpellID="PerfSpell_Key", fldLstRowInd="PerfSpell_Exit_Ind", fldEventInd="DefaultStatus1", genPath=genPath)
 ### RESULTS: Top single-factor models: Arrears, InterestRate_Nom
 # Results do not vary much from each other, at least not meaningfully
 
+# - Test goodness-of-fit using AIC-measure
 aicTable_PWPST <- aicTable(datCredit_train, variables=vars2, fldSpellID="PerfSpell_Key",
                            TimeDef="PWPST", strataVar="PerfSpell_Num_binned", genPath=genPath)
 ### RESULTS: Top single-factor models: Arrears, InterestRate_Nom
