@@ -1,4 +1,5 @@
-# ========================= ANALYTICS: TERM-STRUCTURE ==========================
+# ============================= TERM-STRUCTURES: ACTUAL VS EXPECTED ==============
+# Calculate and compare the term-structures of default risk
 # Ancillary script to compare different approaches to deriving the term-structure 
 # of default risk across time from the various Cox regression models
 # --------------------------------------------------------------------------------
@@ -72,7 +73,7 @@ vecVars_PWPST_adv <- c( # Delinquency-themed
 cox_PWPST_adv <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ ", 
                                          paste(vecVars_PWPST_adv,collapse=" + "), 
                                          " + strata(PerfSpell_Num_binned)")),
-                       id=PerfSpell_Key, datCredit_train, ties="efron", model=T)
+                       id=PerfSpell_Key, datCredit_train, ties="efron", model=T, x=T, y=T)
 summary(cox_PWPST_adv); AIC(cox_PWPST_adv); concordance(cox_PWPST_adv)
 
 
@@ -374,7 +375,7 @@ ggsave(gsurv_ft, file=paste0(genFigPath, "Approach2_EventProb_", mainEventName,"
 
 
 
-# ------ Approach 3: Using predict() with type = "expected"
+# ------ Approach 3: Using predict()
 
 # -- Assumption: The eventual lagging of [Survival] assumes TimeinPerfSpell=1 at the start, since only then will S(t0)=1.
 # But left-truncated accounts violate this assumption.
@@ -382,27 +383,48 @@ ggsave(gsurv_ft, file=paste0(genFigPath, "Approach2_EventProb_", mainEventName,"
     datCredit_valid[PerfSpell_Counter == 1, .N])
 ### RESULTS: 38% of accounts violate this assumption
 
+# - Estimate baseline cumulative hazard
+bh <- as.data.table(basehaz(cox_PWPST_adv, centered=F))
+bh[, PerfSpell_Num_binned := case_when(
+  strata == "PerfSpell_Num_binned=1" ~ 1,
+  strata == "PerfSpell_Num_binned=2" ~ 2,
+  strata == "PerfSpell_Num_binned=3" ~ 3,
+  strata == "PerfSpell_Num_binned=4" ~ 4
+)]
+setnames(bh, c("CHaz_baseline", "TimeInPerfSpell", "strata", "PerfSpell_Num_binned"))
+
+# - Join H(t) with main dataset
+datCredit_valid <- merge(datCredit_valid, bh, by=c("TimeInPerfSpell", "PerfSpell_Num_binned"), all.x=T)
+
 # - Extract those left-truncated cases, add a record, decrement the time variable, and merge back
 datAdd <- datCredit_valid[PerfSpell_Counter == 1 & TimeInPerfSpell>1, ]
 datAdd[, TimeInPerfSpell := TimeInPerfSpell - 1]
 datAdd[, Added := T]; datCredit_valid[, Added := F]
 datCredit_valid <- rbind(datAdd, datCredit_valid); rm(datAdd); gc()
 setDT(datCredit_valid, key=c("PerfSpell_Key", "TimeInPerfSpell"))
-#test <- subset(datCredit_valid, PerfSpell_Key == vSpellKeys[j])
 
-# - Score cases by estimating the cumulative hazard function H(t,x)
-datCredit_valid[, CHaz:=predict(cox_PWPST_adv, new=datCredit_valid, type="expected", id=PerfSpell_Key)]
-# Calculate survival probability S(t,x)=exp(-H(t,x))
-datCredit_valid[, Survival := exp(-CHaz)]
+# - Score cases by estimating the linear predictors
+datCredit_valid[, RiskScore := predict(cox_PWPST_adv, type="risk", newdata=.SD[], id=PerfSpell_Key)]
+
+# Compute cumulative hazard H(t,x) and corresponding conditional survival probability S(t,x)
+datCredit_valid[, CHaz := CHaz_baseline*RiskScore] # H(t,x)
+datCredit_valid[, Survival := exp(-CHaz)] # Calculate survival S(t,x)=exp(-H(t,x))
 datCredit_valid[, Survival_1 := shift(Survival, n=1, type="lag", fill=1), by=list(PerfSpell_Key)]
-# Calculate key survival quantities from S(t,x)
-datCredit_valid[, Hazard := (Survival_1 - Survival)/Survival_1]
-#datCredit_valid[, EventRate := Survival_1 * Hazard]
 datCredit_valid[, EventRate := Survival_1 - Survival]
+
+# - Score cases by estimating the cumulative hazard function H(t,x) directly
+datCredit_valid[, CHaz2:=predict(cox_PWPST_adv, new=.SD[], type="expected", id=PerfSpell_Key)]
+datCredit_valid[, Survival2 := exp(-CHaz)]
+datCredit_valid[, Survival2_1 := shift(Survival, n=1, type="lag", fill=1), by=list(PerfSpell_Key)]
+# Calculate key survival quantities from S(t,x)
+#datCredit_valid[, Hazard2 := (Survival_1 - Survival)/Survival_1]
+#datCredit_valid[, EventRate := Survival_1 * Hazard]
+datCredit_valid[, EventRate2 := Survival2_1 - Survival2]
 
 # Remove added cases
 datCredit_valid <- subset(datCredit_valid, Added == F)
 datCredit_valid[, Added := NULL]
+
 
 
 
@@ -413,8 +435,10 @@ if (!exists('datSurv')) unpack.ffdf(paste0(genPath,"datSurv_KM_MultiSpell"), tem
 setDT(datSurv_PWPST, key="End")
 
 # - Determine population average survival and event rate across loans per time period
-datAggr <- datCredit_valid[, list(EventRate = mean(EventRate,na.rm=T), Freq=.N),by=list(TimeInPerfSpell)]
+datAggr <- datCredit_valid[, list(EventRate = mean(EventRate,na.rm=T),
+                                  EventRate2 = mean(EventRate2,na.rm=T), Freq=.N),by=list(TimeInPerfSpell)]
 plot(datAggr[TimeInPerfSpell <= 300, TimeInPerfSpell], datAggr[TimeInPerfSpell <= 300, EventRate], type="b")
+plot(datAggr[TimeInPerfSpell <= 300, TimeInPerfSpell], datAggr[TimeInPerfSpell <= 300, EventRate2], type="b")
 plot(datSurv[Time <= 300, Time], datSurv[Time <= 300, EventRate], type="b")
 
 
@@ -498,6 +522,7 @@ ggsave(gsurv_ft, file=paste0(genFigPath, "Approach3_EventProb_", mainEventName,"
 
 
 # -- Test case comparison
+if (!exists('datSurv_PWPST')) unpack.ffdf(paste0(genPath,"datSurv_PWPST"), tempPath);gc()
 # Extract test case
 test1 <- subset(datSurv_PWPST, PerfSpell_Key %in% vSpellKeys[1])
 # Extract test case
@@ -530,3 +555,5 @@ datFusion <- merge(datSurv_PWPST, datHaz[,list(PerfSpell_Key=Key, End=Time, Surv
                                                CHaz_custom=CHaz, EventProb_Custom=EventProb)], by=c("PerfSpell_Key", "End"))
 plot(datFusion$Survival, type="b"); plot(datFusion$Survival_custom, col="red", type="b")
 plot(datFusion$Survival-datFusion$Survival_custom, type="b")
+
+

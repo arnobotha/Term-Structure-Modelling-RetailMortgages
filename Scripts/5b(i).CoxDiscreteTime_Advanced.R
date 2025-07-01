@@ -1,5 +1,6 @@
 # ======================================= INPUT SPACE: Cox PO (PWP) ADVANCED============================
-# Divide data into thematic groups and perform data analysis on them to compile an input space for the TPWPST model
+# Divide data into thematic groups and perform data analysis on them to compile an input space for 
+# and advanced discrete-time hazard model, using the PWPST-definition for recurrency.
 # ------------------------------------------------------------------------------------------------------
 # PROJECT TITLE: Default survival modelling
 # SCRIPT AUTHOR(S): Dr Arno Botha (AB)

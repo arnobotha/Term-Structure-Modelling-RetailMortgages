@@ -55,6 +55,8 @@ require(survivalROC) # for time-dependent ROC-analysis from Heagerty et al.
 #require(risksetROC) # for time-dependent ROC-analysis (I/D Cox regression method from Heagerty, P.J., Zheng Y. (2005))
 require(pROC); require(ROCR) # both for cross-sectional ROC-analysis (main:pROC)
 require(MASS)
+require(sandwich) # for robust variance estimators when using weights in glm()
+require(lmtest) # for coeftest() "summary" given robust variance estimators
 
 #for plots
 require(ggplot2)

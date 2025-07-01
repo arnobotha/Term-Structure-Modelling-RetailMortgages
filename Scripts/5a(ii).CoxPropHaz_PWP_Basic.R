@@ -1,5 +1,6 @@
 # ======================================= INPUT SPACE: Cox PH (PWP) BASIC ==============================
-# Divide data into thematic groups and perform data analysis on them to compile an input space for the PWPST model
+# Divide data into thematic groups and perform data analysis on them to compile an input space for a
+# basic Cox Proportional Hazards (CPH) model, having used the PWPST-time defintiion
 # ------------------------------------------------------------------------------------------------------
 # PROJECT TITLE: Default survival modelling
 # SCRIPT AUTHOR(S): Dr Arno Botha (AB)

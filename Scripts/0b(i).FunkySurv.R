@@ -457,6 +457,90 @@ survQuants <- function(datGiven, coxGiven, it=1, numKeys, genPath="", timeVar="E
 
 
 
+# --- Function to calculate time-dependent Brier Score (tBS) for a given object's predictions
+# Input:    [datGiven]: given loan history; [modGiven]: fitted cox PH or discrete-time hazard model;
+#           [predType]: option to pass to predict(); [spellPeriodMax]: maximum period to impose upon spell ages
+#           <fldNames>: Various field names for quantities of interest
+# Output:   Vector of tBS-values; Integrated Brier Score (IBS)
+tBrierScore <- function(datGiven, modGiven, predType="response", spellPeriodMax=300,
+                        fldKey="PerfSpell_Key", fldStart = "Start", fldStop="TimeInPerfSpell",
+                        fldCensored="PerfSpell_Censored", fldSpellAge="PerfSpell_Age",
+                        fldSpellOutcome="PerfSpellResol_Type_Hist") {
+  # Testing conditions
+  # datGiven <- datCredit; modGiven <- modLR; predType <- "response"; spellPeriodMax <- 300
+  # fldKey <- "PerfSpell_Key"; fldStart <- "Start"; fldStop<-"TimeInPerfSpell";
+  # fldCensored<-"PerfSpell_Censored"; fldSpellAge<-"PerfSpell_Age"; fldSpellOutcome<-"PerfSpellResol_Type_Hist"
+  
+  
+  # --- Estimate survival rate of the censoring event G(t) = P(C >= t) for time-to-censoring variable C
+  # This prepares for implementing the Inverse Probability of Censoring Weighting (IPCW) scheme,
+  # as an adjustment to event rates (discrete density), as well as for the time-dependent Brier score
+  
+  # - Compute Kaplan-Meier survival estimates (product-limit) for censoring-event | Spell-level with right-censoring & left-truncation
+  km_Censoring <- survfit(
+    as.formula(paste0("Surv(time=",fldStart,", time2=", fldStop, ", event=", fldCensored, "==1, type='counting') ~ 1")), 
+    id=get(fldKey), data=datGiven)
+  # summary(km_Censoring)$table # overall summary statistics
+  # plot(km_Censoring, conf.int = T) # survival curve
+  datG <- data.table(summary(km_Censoring)$time, summary(km_Censoring)$surv)
+  setnames(datG, c(fldStop, "G_t"))
+  datG_ti <- data.table(EventTime = summary(km_Censoring)$time, G_Ti = summary(km_Censoring)$surv)
+  
+  
+  # --- Calculate survival quantities of interest
+  # Predict hazard h(t) = P(T=t | T>= t) in discrete-time
+  datGiven[, Hazard := predict(modGiven, newdata=datGiven, type = predType)]
+  if (predType=="response") {
+    # Derive survival probability S(t) = \prod ( 1- hazard), based on output of predict()
+    datGiven[, Survival := cumprod(1-Hazard), by=list(get(fldKey))] 
+  } else if (predType=="exp") {
+    # Calculate survival probability S(t,x)=exp(-H(t,x)), based on output of predict()
+    # NOTE: Hazard is actually the cumulative hazard in this context
+    datGiven[, Survival := exp(-Hazard), by=list(get(fldKey))] 
+  }
+  # - Merge censoring survival probability unto main set
+  datGiven <- merge(datGiven, datG, by=fldStop, all.x=T)
+  datGiven[is.na(G_t), G_t := 1] # Fill any missing G_t with 1 (no censoring information)
+  
+  
+  # --- Compute Censoring survival probability at age T_i for each subject (i,j), i..e, G_hat(T_i)
+  # This requires mapping each subject's observed event time (Spell age) to g_hat(T_i)
+  datGiven <- merge(datGiven, datG_ti, by.x=fldSpellAge, by.y="EventTime", all.x=T)
+  datGiven[is.na(G_Ti), G_Ti := 1]
+  
+  
+  # --- Compute constituent quantities of time-dependent Brier score (tBS)
+  # - Compute binary event indicator at time t: y(t) = I(T>t)
+  datGiven[, y_t := as.integer(get(fldSpellAge) > get(fldStop))]
+  # - Compute weighted Brier score at each time point
+  datGiven[, Weight_w := fifelse(get(fldSpellAge) > get(fldStop), 1/G_t,
+                                 fifelse(get(fldSpellAge) <= get(fldStop) & get(fldSpellOutcome)=="Defaulted", 1/G_Ti,
+                                         0)), by=list(get(fldKey))]
+  # -- Compute squared error loss per row ---
+  datGiven[, SquaredError := (y_t - Survival)^2]
+  
+  
+  # --- Aggregate and compute weighted Brier score per time point
+  datTBS <- datGiven[Weight_w > 0 & get(fldStop)<=spellPeriodMax, .(
+    mean(Weight_w * SquaredError, na.rm = TRUE)
+  ), by=list(get(fldStop))]
+  setnames(datTBS, c(fldStop, "Brier"))
+  # Subset only to specified max
+  IBS <- mean(datTBS$Brier, na.rm=T)
+  
+  return(list(tBS=datTBS, IBS=IBS))
+  
+  # - Cleanup (useful during interactive debugging of function)
+  rm(datGiven, modGiven, fldKey, fldStart, fldStop, fldCensored, fldSpellAge, predType,
+     km_Censoring, datTBS,datG, datG_ti)
+}
+
+
+
+
+
+
+
 ### AB: Given the work of Bernard, I'm no longer sure of the utility of the below.
 
 # --- function to compute the (unscaled) Schoenfeld residuals for a Cox PH model
