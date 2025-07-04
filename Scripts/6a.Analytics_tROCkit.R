@@ -47,6 +47,9 @@ datCredit_valid <- datCredit_valid_PWPST[!is.na(PerfSpell_Num),]
 datCredit_train[, Start := TimeInPerfSpell - 1]
 datCredit_valid[, Start := TimeInPerfSpell - 1]
 
+# - Weigh default cases heavier. as determined interactively based on calibration success (script 6e)
+datCredit_train[, Weight := ifelse(DefaultStatus1==1,10,1)]
+
 
 
 
@@ -63,7 +66,6 @@ cox_PWPST_basic <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpe
                                            paste(vecVars_PWPST_bas,collapse=" + "), 
                                            " + strata(PerfSpell_Num_binned)")),
                          id=PerfSpell_Key, data=datCredit_train, ties="efron")
-summary(cox_PWPST_basic); AIC(cox_PWPST_basic); concordance(cox_PWPST_basic)
 
 
 
@@ -84,7 +86,6 @@ cox_PWPST_adv <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell
                                          paste(vecVars_PWPST_adv,collapse=" + "), 
                                      " + strata(PerfSpell_Num_binned)")),
                    id=PerfSpell_Key, datCredit_train, ties="efron")
-summary(cox_PWPST_adv); AIC(cox_PWPST_adv); concordance(cox_PWPST_adv)
 
 
 
@@ -99,7 +100,7 @@ vars_basic <- c("-1", "Time_Binned", "log(TimeInPerfSpell):PerfSpell_Num_binned"
 
 # - Fit discrete-time hazard model with selected variables
 modLR_basic <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars_basic, collapse = " + "))),
-                    data=datCredit_train, family="binomial")
+                    data=datCredit_train, family="binomial", weights = Weight)
 
 
 
@@ -108,12 +109,12 @@ modLR_basic <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars_basic, coll
 vars <- c("-1", "Time_Binned*PerfSpell_Num_binned", #"log(TimeInPerfSpell):PerfSpell_Num_binned",
           "g0_Delinq_SD_4", "g0_Delinq_Lag_1", "slc_acct_arr_dir_3", "slc_acct_roll_ever_24_imputed_mean",
           "AgeToTerm_Aggr_Mean", "InstalmentToBalance_Aggr_Prop", "NewLoans_Aggr_Prop",
-          "pmnt_method_grp", "InterestRate_Nom", "BalanceToPrincipal",
+          "pmnt_method_grp", "InterestRate_Nom",
           "M_Inflation_Growth_6","M_DTI_Growth")
 
 # - Fit discrete-time hazard model with selected variables
 modLR <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars, collapse = " + "))),
-                    data=datCredit_train, family="binomial")
+                    data=datCredit_train, family="binomial", weights = Weight)
 
 
 
@@ -281,7 +282,7 @@ objROC1_PWPST_CoxDisc_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR
                                        predType="response")
 objROC1_PWPST_CoxDisc_bas$AUC; objROC1_PWPST_CoxDisc_bas$ROC_graph
 proc.time() - ptm
-### RESULTS: AUC up to t: 93.37%, achieved in 374.31 secs
+### RESULTS: AUC up to t: 93.76%, achieved in 754.31 secs
 
 
 # -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
@@ -296,7 +297,7 @@ objROC2_PWPST_CoxDisc_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR
                                        predType="response")
 objROC2_PWPST_CoxDisc_bas$AUC; objROC2_PWPST_CoxDisc_bas$ROC_graph
 proc.time() - ptm
-### RESULTS: AUC up to t: 94.34%, achieved in  767.13 secs
+### RESULTS: AUC up to t: 94.53%, achieved in  1566.49 secs
 
 
 # -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
@@ -311,7 +312,7 @@ objROC3_PWPST_CoxDisc_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR
                                        predType="response")
 objROC3_PWPST_CoxDisc_bas$AUC; objROC3_PWPST_CoxDisc_bas$ROC_graph
 proc.time() - ptm
-### RESULTS: AUC up to t: 94.41%, achieved in 1267.45 secs
+### RESULTS: AUC up to t: 94.47%, achieved in 2667.72 secs
 
 
 # -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
@@ -326,7 +327,7 @@ objROC4_PWPST_CoxDisc_bas <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR
                                        predType="response")
 objROC4_PWPST_CoxDisc_bas$AUC; objROC4_PWPST_CoxDisc_bas$ROC_graph
 proc.time() - ptm
-### RESULTS: AUC up to t: 94.16%, achieved in 1762.33 secs
+### RESULTS: AUC up to t: 94.3%, achieved in 3748.25 secs
 
 
 # -- Store experimental objects | Memory optimisation
@@ -356,7 +357,7 @@ objROC1_PWPST_CoxDisc_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR
                                         predType="response")
 objROC1_PWPST_CoxDisc_adv$AUC; objROC1_PWPST_CoxDisc_adv$ROC_graph
 proc.time() - ptm
-### RESULTS: AUC up to t: 98.05%, achieved in 569.43  secs
+### RESULTS: AUC up to t: 96.12%, achieved in 725.14 secs
 
 
 # -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
@@ -371,7 +372,7 @@ objROC2_PWPST_CoxDisc_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR
                                         predType="response")
 objROC2_PWPST_CoxDisc_adv$AUC; objROC2_PWPST_CoxDisc_adv$ROC_graph
 proc.time() - ptm
-### RESULTS: AUC up to t: 98.12%, achieved in 1080.99 secs
+### RESULTS: AUC up to t: 98.15%, achieved in 1425.78  secs
 
 
 # -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
@@ -386,7 +387,7 @@ objROC3_PWPST_CoxDisc_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR
                                         predType="response")
 objROC3_PWPST_CoxDisc_adv$AUC; objROC3_PWPST_CoxDisc_adv$ROC_graph
 proc.time() - ptm
-### RESULTS: AUC up to t: 98.16%, achieved in 1755.98 secs
+### RESULTS: AUC up to t: 96.21%, achieved in 2354.64  secs
 
 
 # -- Multi-threaded calculation of the # AUC from given start up to given prediction time 3 in following the CD-approach
@@ -401,7 +402,7 @@ objROC4_PWPST_CoxDisc_adv <- tROC.multi(datGiven=datCredit_valid, modGiven=modLR
                                         predType="response")
 objROC4_PWPST_CoxDisc_adv$AUC; objROC4_PWPST_CoxDisc_adv$ROC_graph
 proc.time() - ptm
-### RESULTS: AUC up to t: 98.19%, achieved in 2494.16 secs
+### RESULTS: AUC up to t: 96.24%, achieved in 3249.49  secs
 
 
 # -- Store experimental objects | Memory optimisation
@@ -452,7 +453,7 @@ for (i in 1:length(vecPercTimepoint)) {
 
 # -- Graph a combined ROC-graph across prediction times t
 # - Aesthetic parameters
-datGraph[, FacetLabel := "Prentice-Williams-Peterson (PWP) model: Basic"]
+datGraph[, FacetLabel := "Prentice-Williams-Peterson (PWP): Basic model"]
 vCol <- brewer.pal(8,"Set1")
 vLabels_F <- setNames(vLabels, paste0(letters[1:length(vecPercTimepoint)],"_", vecPercTimepoint))
 chosenFont <- "Cambria"
@@ -470,8 +471,8 @@ chosenFont <- "Cambria"
     # Add 45-degree line
     geom_segment(x = 0, y = 0, xend = 1, yend = 1, color = "grey", linewidth=0.2) +
     # Main line graph
-    geom_step(aes(x=x, y=y, linetype=PredictTime, colour=PredictTime), linewidth=0.05) + 
-    geom_point(aes(x=x, y=y, shape=PredictTime, colour=PredictTime), size=0.25) +
+    geom_step(aes(x=x, y=y, linetype=PredictTime, colour=PredictTime), linewidth=0.5) + 
+    #geom_point(aes(x=x, y=y, shape=PredictTime, colour=PredictTime), size=0.25) +
     # Facets and scales
     facet_grid(FacetLabel ~ .) +  
     scale_color_manual(name=bquote("ROC"*(italic(t))), values=vCol, labels=vLabels) + 
@@ -523,7 +524,7 @@ for (i in 1:length(vecPercTimepoint)) {
 
 # -- Graph a combined ROC-graph across prediction times t
 # - Aesthetic parameters
-datGraph[, FacetLabel := "Prentice-Williams-Peterson (PWP) model: Advanced"]
+datGraph[, FacetLabel := "Prentice-Williams-Peterson (PWP): Advanced model"]
 vCol <- brewer.pal(8,"Set1")
 vLabels_F <- setNames(vLabels, paste0(letters[1:length(vecPercTimepoint)],"_", vecPercTimepoint))
 chosenFont <- "Cambria"
@@ -541,8 +542,8 @@ chosenFont <- "Cambria"
     # Add 45-degree line
     geom_segment(x = 0, y = 0, xend = 1, yend = 1, color = "grey", linewidth=0.2) +
     # Main line graph
-    geom_step(aes(x=x, y=y, linetype=PredictTime, colour=PredictTime), linewidth=0.05) + 
-    geom_point(aes(x=x, y=y, shape=PredictTime, colour=PredictTime), size=0.25) +
+    geom_step(aes(x=x, y=y, linetype=PredictTime, colour=PredictTime), linewidth=0.5) + 
+    #geom_point(aes(x=x, y=y, shape=PredictTime, colour=PredictTime), size=0.25) +
     # Facets and scales
     facet_grid(FacetLabel ~ .) +  
     scale_color_manual(name=bquote("ROC"*(italic(t))), values=vCol, labels=vLabels) + 
@@ -612,8 +613,8 @@ chosenFont <- "Cambria"
     # Add 45-degree line
     geom_segment(x = 0, y = 0, xend = 1, yend = 1, color = "grey", linewidth=0.2) +
     # Main line graph
-    geom_step(aes(x=x, y=y, linetype=PredictTime, colour=PredictTime), linewidth=0.05) + 
-    geom_point(aes(x=x, y=y, shape=PredictTime, colour=PredictTime), size=0.25) +
+    geom_step(aes(x=x, y=y, linetype=PredictTime, colour=PredictTime), linewidth=0.5) + 
+    #geom_point(aes(x=x, y=y, shape=PredictTime, colour=PredictTime), size=0.25) +
     # Facets and scales
     facet_grid(FacetLabel ~ .) +  
     scale_color_manual(name=bquote("ROC"*(italic(t))), values=vCol, labels=vLabels) + 
@@ -630,7 +631,7 @@ ggsave(gg, file=paste0(paste0(genFigPath,"/tROC-Analyses/", "DefaultSurvModel-Co
 
 
 
-# ------ Prentice-Williams-Peterson (PWP) Total-time definition | Basic discrete-time hazard model
+# ------ Prentice-Williams-Peterson (PWP) Total-time definition | Advanced discrete-time hazard model
 
 # - Ensure required objects exist in memory
 if (!exists('objROC1_PWPST_CoxDisc_adv')) unpack.ffdf(paste0(genPath,"DefaultSurvModel-CoxDisc-PWPST-ROC_Depedendence_03_adv"), tempPath);gc()
@@ -683,8 +684,8 @@ chosenFont <- "Cambria"
     # Add 45-degree line
     geom_segment(x = 0, y = 0, xend = 1, yend = 1, color = "grey", linewidth=0.2) +
     # Main line graph
-    geom_step(aes(x=x, y=y, linetype=PredictTime, colour=PredictTime), linewidth=0.05) + 
-    geom_point(aes(x=x, y=y, shape=PredictTime, colour=PredictTime), size=0.25) +
+    geom_step(aes(x=x, y=y, linetype=PredictTime, colour=PredictTime), linewidth=0.5) + 
+    #geom_point(aes(x=x, y=y, shape=PredictTime, colour=PredictTime), size=0.25) +
     # Facets and scales
     facet_grid(FacetLabel ~ .) +  
     scale_color_manual(name=bquote("ROC"*(italic(t))), values=vCol, labels=vLabels) + 

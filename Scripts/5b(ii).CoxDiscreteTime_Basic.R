@@ -39,6 +39,9 @@ datCredit_valid <- datCredit_valid_PWPST[!is.na(PerfSpell_Num),]
 # remove previous objects from memory
 rm(datCredit_train_PWPST, datCredit_valid_PWPST); gc()
 
+# - Weigh default cases heavier. as determined interactively based on calibration success (script 6e)
+datCredit_train[, Weight := ifelse(DefaultStatus1==1,10,1)]
+
 # - Fit an "empty" model as a performance gain, used within some diagnostic functions
 modLR_base <- glm(PerfSpell_Event ~ 1, data=datCredit_train, family="binomial")
 
@@ -47,10 +50,16 @@ modLR_base <- glm(PerfSpell_Event ~ 1, data=datCredit_train, family="binomial")
 vars_basic <- c("-1", "Time_Binned", "log(TimeInPerfSpell):PerfSpell_Num_binned",
                 "Arrears", "InterestRate_Nom", "M_Inflation_Growth_6")
 modLR_basic <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars_basic, collapse = " + "))),
-              data=datCredit_train, family="binomial")
-summary(modLR_basic);
+              data=datCredit_train, family="binomial", weights = Weight)
+#summary(modLR);
+# Robust (sandwich) standard errors
+robust_se <- vcovHC(modLR_basic, type="HC0")
+# Summary with robust SEs
+coeftest(modLR_basic, vcov.=robust_se)
+
+# - Other diagnostics
 evalLR(modLR_basic, modLR_base, datCredit_train, targetFld="PerfSpell_Event", predClass=1)
-### RESULTS: AIC:  128,556;  McFadden R^2:  27.78%; AUC:  93.80%.
+### RESULTS: AIC:  653,566;  McFadden R^2:  -267.27% (??); AUC:  94.62%.
 
 # - Test goodness-of-fit using AIC-measure over single-factor models
 aicTable_CoxDisc_basic <- aicTable(datCredit_train, vars_basic, TimeDef=c("Cox_Discrete","PerfSpell_Event"), genPath=genObjPath, modelType="Cox_Discrete")

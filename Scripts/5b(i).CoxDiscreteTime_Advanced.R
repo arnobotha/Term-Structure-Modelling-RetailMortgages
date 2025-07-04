@@ -605,6 +605,11 @@ proc.time() - ptm # IGNORE: elapsed runtime; 117m
 # - Domain expertise
 # Exchanged log(TimeInPerfSpell) with Time_Binned for final modelling iteration
 # Removed intercept term
+# Reweighted default cases
+# Removed BalanceToPrincipal based on robust sandwich estimator's summary (given weighting of cases)
+
+# - Weigh default cases heavier. as determined interactively based on calibration success (script 6e)
+datCredit_train[, Weight := ifelse(DefaultStatus1==1,10,1)]
 
 # - Final variables
 vars <- c("-1", "Time_Binned*PerfSpell_Num_binned", #"log(TimeInPerfSpell):PerfSpell_Num_binned",
@@ -612,13 +617,19 @@ vars <- c("-1", "Time_Binned*PerfSpell_Num_binned", #"log(TimeInPerfSpell):PerfS
           #"g0_Delinq_Ave","slc_acct_pre_lim_perc_imputed_med", "TimeInDelinqState", #"Principal", "M_Emp_Growth_6"
           "slc_acct_arr_dir_3", "slc_acct_roll_ever_24_imputed_mean",
           "AgeToTerm_Aggr_Mean", "InstalmentToBalance_Aggr_Prop", "NewLoans_Aggr_Prop",
-          "pmnt_method_grp", "InterestRate_Nom", "BalanceToPrincipal",
+          "pmnt_method_grp", "InterestRate_Nom",
           "M_Inflation_Growth_6","M_DTI_Growth")
 modLR <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars, collapse = " + "))),
-              data=datCredit_train, family="binomial")
-summary(modLR);
+              data=datCredit_train, family="binomial", weights = Weight)
+#summary(modLR);
+# Robust (sandwich) standard errors
+robust_se <- vcovHC(modLR, type="HC0")
+# Summary with robust SEs
+coeftest(modLR, vcov.=robust_se)
+
+# Other diagnostics
 evalLR(modLR, modLR_base, datCredit_train, targetFld="PerfSpell_Event", predClass=1)
-### RESULTS: AIC:  23,789;  McFadden R^2:  86.69%; AUC:  99.94%.
+### RESULTS: AIC:  86,046;  McFadden R^2:  51.70%; AUC:  99.94%.
 
 
 
@@ -636,6 +647,9 @@ datCredit_valid <- datCredit_valid_PWPST[!is.na(PerfSpell_Num),]
 # remove previous objects from memory
 rm(datCredit_train_PWPST, datCredit_valid_PWPST); gc()
 
+# - Weigh default cases heavier. as determined interactively based on calibration success (script 6e)
+datCredit_train[, Weight := ifelse(DefaultStatus1==1,10,1)]
+
 # - Fit an "empty" model as a performance gain, used within some diagnostic functions
 modLR_base <- glm(PerfSpell_Event ~ 1, data=datCredit_train, family="binomial")
 
@@ -643,13 +657,19 @@ modLR_base <- glm(PerfSpell_Event ~ 1, data=datCredit_train, family="binomial")
 vars <- c("-1", "Time_Binned*PerfSpell_Num_binned", #"log(TimeInPerfSpell):PerfSpell_Num_binned",
   "g0_Delinq_SD_4", "g0_Delinq_Lag_1", "slc_acct_arr_dir_3", "slc_acct_roll_ever_24_imputed_mean",
   "AgeToTerm_Aggr_Mean", "InstalmentToBalance_Aggr_Prop", "NewLoans_Aggr_Prop",
-  "pmnt_method_grp", "InterestRate_Nom", "BalanceToPrincipal",
+  "pmnt_method_grp", "InterestRate_Nom",
   "M_Inflation_Growth_6","M_DTI_Growth")
 modLR <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars, collapse = " + "))),
-              data=datCredit_train, family="binomial")
-summary(modLR);
+              data=datCredit_train, family="binomial", weights = Weight)
+#summary(modLR);
+# Robust (sandwich) standard errors
+robust_se <- vcovHC(modLR, type="HC0")
+# Summary with robust SEs
+coeftest(modLR, vcov.=robust_se)
+
+# - Other diagnostics
 evalLR(modLR, modLR_base, datCredit_train, targetFld="PerfSpell_Event", predClass=1)
-### RESULTS: AIC:  23,789;  McFadden R^2:  86.69%; AUC:  99.94%.
+### RESULTS: AIC:  86,046;  McFadden R^2:  51.70%; AUC:  99.94%.
 
 # - Test goodness-of-fit using AIC-measure over single-factor models
 aicTable_CoxDisc <- aicTable(datCredit_train, vars, TimeDef=c("Cox_Discrete","PerfSpell_Event"), genPath=genObjPath, modelType="Cox_Discrete")
@@ -664,49 +684,4 @@ Table_CoxDisc <- concTable_CoxDisc[,1:2] %>% left_join(aicTable_CoxDisc, by ="Va
 
 # Save objects
 pack.ffdf(paste0(genObjPath,"CoxDisc_advanced_fits"), Table_CoxDisc)
-
-
-
-
-
-###################################################################################### AB: Restructure somewhere
-# ------ 2. Analytics: At-risk proportion over unique failure times
-
-# - General parameters
-sMaxSpellAge_graph <- 300 # max for [PerfSpell_Age] for graphing purposes
-
-# - Create two time series
-datGraph <- rbind(datSurv_sub[,list(Time, Value=AtRisk_perc, Type="a_AtRisk")],
-                  datSurv_sub[,list(Time, Value=SurvivalProb_KM, Type="b_Survival")])
-
-datGraph[, FacetLabel := "Prentice-Williams-Peterson (PWP) spell-time"]
-
-# - Aesthetic engineering
-chosenFont <- "Cambria"
-vCol <- brewer.pal(8, "Set1")[c(3,1)]
-vLabel <- c("a_AtRisk"=bquote("At-risk % of max("*italic(n)[t]*")"),
-            "b_Survival"=bquote("Survival probability "*italic(S(t))*"(Kaplan-Meier)"))
-
-(gAtRisk <- ggplot(datGraph[Time <= sMaxSpellAge_graph,], aes(x=Time, y=Value, group=Type)) + theme_minimal() +
-    labs(y="Value (%)", 
-         x=bquote(Discrete~time~italic(t)*" (months) in spell: Multi-spell")) + 
-    theme(text=element_text(family=chosenFont),legend.position = "bottom",
-          strip.background=element_rect(fill="snow2", colour="snow2"),
-          strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) + 
-    # Main graph
-    geom_point(aes(colour=Type, shape=Type), size=1.25) + 
-    geom_line(aes(colour=Type, linetype=Type), linewidth=0.5) +
-    # Scales and options
-    facet_grid(FacetLabel ~ .) + 
-    scale_colour_manual(name="", values=vCol, labels=vLabel) + 
-    scale_linetype_discrete(name="", labels=vLabel) + 
-    scale_shape_discrete(name="", labels=vLabel) + 
-    scale_y_continuous(breaks=breaks_pretty(), label=percent) + 
-    scale_x_continuous(breaks=breaks_pretty(n=8), label=comma))
-
-########################################################################################### AB: continue here
-# - Save plot
-dpi <- 180 # reset
-ggsave(gAtRisk, file=paste0(genFigPath, "Approach1_EventProb_SpellLevel_FirstSpell_ActVsExp.png"),
-       width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
 

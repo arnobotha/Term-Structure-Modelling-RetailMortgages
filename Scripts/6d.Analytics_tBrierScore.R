@@ -46,6 +46,10 @@ datCredit_valid <- datCredit_valid_PWPST[!is.na(PerfSpell_Num),]
 datCredit_train[, Start := TimeInPerfSpell - 1]
 datCredit_valid[, Start := TimeInPerfSpell - 1]
 
+# - Weigh default cases heavier. as determined interactively based on calibration success (script 6e)
+datCredit_train[, Weight := ifelse(DefaultStatus1==1,10,1)]
+datCredit_valid[, Weight := ifelse(DefaultStatus1==1,10,1)] # for merging purposes
+
 
 
 
@@ -62,7 +66,6 @@ cox_PWPST_basic <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpe
                                            paste(vecVars_PWPST_bas,collapse=" + "), 
                                            " + strata(PerfSpell_Num_binned)")),
                          id=PerfSpell_Key, data=datCredit_train, ties="efron", model=T)
-summary(cox_PWPST_basic); AIC(cox_PWPST_basic); concordance(cox_PWPST_basic)
 
 
 
@@ -83,7 +86,6 @@ cox_PWPST_adv <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell
                                          paste(vecVars_PWPST_adv,collapse=" + "), 
                                          " + strata(PerfSpell_Num_binned)")),
                        id=PerfSpell_Key, datCredit_train, ties="efron", model=T)
-summary(cox_PWPST_adv); AIC(cox_PWPST_adv); concordance(cox_PWPST_adv)
 
 
 
@@ -98,8 +100,7 @@ vars_basic <- c("-1", "Time_Binned", "log(TimeInPerfSpell):PerfSpell_Num_binned"
 
 # - Fit discrete-time hazard model with selected variables
 modLR_basic <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars_basic, collapse = " + "))),
-                    data=datCredit_train, family="binomial")
-summary(modLR_basic)
+                    data=datCredit_train, family="binomial", weights = Weight)
 
 
 
@@ -108,13 +109,12 @@ summary(modLR_basic)
 vars <- c("-1", "Time_Binned*PerfSpell_Num_binned", #"log(TimeInPerfSpell):PerfSpell_Num_binned",
           "g0_Delinq_SD_4", "g0_Delinq_Lag_1", "slc_acct_arr_dir_3", "slc_acct_roll_ever_24_imputed_mean",
           "AgeToTerm_Aggr_Mean", "InstalmentToBalance_Aggr_Prop", "NewLoans_Aggr_Prop",
-          "pmnt_method_grp", "InterestRate_Nom", "BalanceToPrincipal",
+          "pmnt_method_grp", "InterestRate_Nom",
           "M_Inflation_Growth_6","M_DTI_Growth")
 
 # - Fit discrete-time hazard model with selected variables
 modLR <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars, collapse = " + "))),
-              data=datCredit_train, family="binomial")
-summary(modLR)
+              data=datCredit_train, family="binomial", weights = Weight)
 
 
 
@@ -211,7 +211,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
     # Annotations
     annotate(geom="text", x=50, y=0.01, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
              family=chosenFont, size=3.5, colour=vCol[1]) + 
-    annotate(geom="text", x=45, y=0.0095, label=paste0("IBS (Advanced): ", round(ibs_adv,3)), 
+    annotate(geom="text", x=45, y=0.009, label=paste0("IBS (Advanced): ", round(ibs_adv,3)), 
              family=chosenFont, size=3.5, colour=vCol[2]) +   
     # Facets & scales
     scale_colour_manual(name="", values=vCol, labels=vLabel) + 
@@ -224,7 +224,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
 (plot.full <- gOuter + annotation_custom(grob = ggplotGrob(gInner), xmin=0, xmax=200, ymin=0.25, ymax=0.9))
 
 # - Save plot
-dpi <- 170
+dpi <- 200
 ggsave(plot.full, file=paste0(genFigPath,"tBrierScores_CoxPH.png"),width=1350/dpi, height=1000/dpi,dpi=dpi, bg="white")
 
 
@@ -257,9 +257,9 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
   # Main graph
   geom_line(aes(colour=Type, linetype=Type), linewidth=0.5) + 
   # Annotations
-  annotate(geom="text", x=50, y=1.5, label=paste0("IBS (Basic): ", round(objCoxDisc_bas$IBS,3)), 
+  annotate(geom="text", x=50, y=18, label=paste0("IBS (Basic): ", round(objCoxDisc_bas$IBS,3)), 
            family=chosenFont, size=3.5, colour=vCol[1]) + 
-  annotate(geom="text", x=43, y=1, label=paste0("IBS (Advanced): ", round(objCoxDisc_adv$IBS,3)), 
+  annotate(geom="text", x=43, y=13, label=paste0("IBS (Advanced): ", round(objCoxDisc_adv$IBS,3)), 
            family=chosenFont, size=3.5, colour=vCol[2]) +     
   # Facets & scales
   facet_grid(FacetLabel ~ .) +  
@@ -284,9 +284,9 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
   # Main graph
   geom_line(aes(colour=Type, linetype=Type), linewidth=0.5, show.legend = F) + 
   # Annotations
-  annotate(geom="text", x=50, y=0.07, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
+  annotate(geom="text", x=50, y=0.7, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
            family=chosenFont, size=3.5, colour=vCol[1]) + 
-  annotate(geom="text", x=45, y=0.063, label=paste0("IBS (Advanced): ", round(ibs_adv,3)), 
+  annotate(geom="text", x=45, y=0.6, label=paste0("IBS (Advanced): ", round(ibs_adv,3)), 
            family=chosenFont, size=3.5, colour=vCol[2]) +   
   # Facets & scales
   scale_colour_manual(name="", values=vCol, labels=vLabel) + 
@@ -296,10 +296,10 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
 )
 
 # - Combining the two above plots onto a single graph
-(plot.full <- gOuter + annotation_custom(grob = ggplotGrob(gInner), xmin=0, xmax=200, ymin=3, ymax=13))
+(plot.full <- gOuter + annotation_custom(grob = ggplotGrob(gInner), xmin=0, xmax=210, ymin=30, ymax=100))
 
 # - Save plot
-dpi <- 170
+dpi <- 200
 ggsave(plot.full, file=paste0(genFigPath,"tBrierScores_CoxDisc.png"),width=1350/dpi, height=1000/dpi,dpi=dpi, bg="white")
 
 

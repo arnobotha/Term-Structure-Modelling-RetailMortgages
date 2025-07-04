@@ -38,6 +38,11 @@ datCredit_valid <- datCredit_valid_PWPST[!is.na(PerfSpell_Num),]
 # remove previous objects from memory
 rm(datCredit_train_PWPST, datCredit_valid_PWPST); gc()
 
+# - Weigh default cases heavier. as determined interactively based on calibration success (script 6e)
+datCredit_train[, Weight := ifelse(DefaultStatus1==1,10,1)]
+datCredit_valid[, Weight := ifelse(DefaultStatus1==1,10,1)] # for merging purposes
+
+
 
 # --- Prentice-Williams-Peterson (PWP) Spell-time definition | Basic discrete-time hazard model
 # - Initialize variables
@@ -46,7 +51,8 @@ vars_basic <- c("-1", "Time_Binned", "log(TimeInPerfSpell):PerfSpell_Num_binned"
 
 # - Fit discrete-time hazard model with selected variables
 modLR_basic <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars_basic, collapse = " + "))),
-                    data=datCredit_train, family="binomial")
+                    data=datCredit_train, family="binomial", weights = Weight)
+
 
 
 # --- Prentice-Williams-Peterson (PWP) Spell-time definition | Advanced discrete-time hazard model
@@ -54,10 +60,10 @@ modLR_basic <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars_basic, coll
 vars <- c("Time_Binned*PerfSpell_Num_binned", #"log(TimeInPerfSpell):PerfSpell_Num_binned",
           "g0_Delinq_SD_4", "g0_Delinq_Lag_1", "slc_acct_arr_dir_3", "slc_acct_roll_ever_24_imputed_mean",
           "AgeToTerm_Aggr_Mean", "InstalmentToBalance_Aggr_Prop", "NewLoans_Aggr_Prop",
-          "pmnt_method_grp", "InterestRate_Nom", "BalanceToPrincipal",
+          "pmnt_method_grp", "InterestRate_Nom",
           "M_Inflation_Growth_6","M_DTI_Growth")
 modLR <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars, collapse = " + "))),
-              data=datCredit_train, family="binomial")
+              data=datCredit_train, family="binomial", weights = Weight)
 
 
 
@@ -223,7 +229,7 @@ vLineType <- c("dashed", "solid", "dashed", "solid", "dashed", "solid")
 (gsurv_ft <- ggplot(datGraph[Time <= sMaxSpellAge_graph,], aes(x=Time, y=EventRate, group=Type)) + theme_minimal() +
     labs(y=bquote(plain(Event~probability~~italic(f(t))*" ["*.(mainEventName)*"]"*"")), 
          x=bquote(Discrete~time~italic(t)*" (months) in spell: Multi-spell"),
-         subtitle="Term-structures of default risk") + 
+         subtitle="Term-structures of default risk: Discrete-time hazard models") + 
     theme(text=element_text(family=chosenFont),legend.position = "bottom",
           strip.background=element_rect(fill="snow2", colour="snow2"),
           strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) + 
@@ -256,4 +262,4 @@ ggsave(gsurv_ft, file=paste0(genFigPath, "EventProb_", mainEventName,"_ActVsExp_
 rm(gsurv_ft, km_Censoring, km_Default, datSurv_censoring, datSurv_exp, datSurv_sub,
    datGraph, datFusion, smthEventRate_Act, smthEventRate_Exp_bas, smthEventRate_Exp_adv,
    vPredSmth_Act, vPredSmth_Exp_bas, vPredSmth_Exp_adv,
-   modLR, modLR_basic)
+   modLR, modLR_basic, datAdd)

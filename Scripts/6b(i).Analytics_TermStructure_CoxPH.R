@@ -30,7 +30,6 @@
 
 
 
-
 # ----------------- 1. Load & prepare data for analysis
 
 # ------ Prentice-Williams-Peterson (PWP) Spell-time definition
@@ -49,6 +48,7 @@ datCredit_valid[, Start := TimeInPerfSpell - 1]
 
 
 
+
 # ----------------- 2a. Fit a Cox regression model on the resampled prepared data
 
 
@@ -62,7 +62,6 @@ cox_PWPST_basic <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpe
                                            paste(vecVars_PWPST_bas,collapse=" + "), 
                                            " + strata(PerfSpell_Num_binned)")),
                          id=PerfSpell_Key, data=datCredit_train, ties="efron", model=T)
-summary(cox_PWPST_basic); AIC(cox_PWPST_basic); concordance(cox_PWPST_basic)
 
 
 
@@ -83,7 +82,6 @@ cox_PWPST_adv <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell
                                          paste(vecVars_PWPST_adv,collapse=" + "), 
                                          " + strata(PerfSpell_Num_binned)")),
                        id=PerfSpell_Key, datCredit_train, ties="efron", model=T)
-summary(cox_PWPST_adv); AIC(cox_PWPST_adv); concordance(cox_PWPST_adv)
 
 
 
@@ -93,13 +91,13 @@ summary(cox_PWPST_adv); AIC(cox_PWPST_adv); concordance(cox_PWPST_adv)
 # Compare various approaches towards deriving the term-structure of default risk,
 # using a single Cox regression model (PWP-definition)
 
-
-# ------ Approach 1: Looped individual survfit()-calls by ID (multi-threaded) | Basic CPH-model
-
 # --- Preliminaries
 numSpellKeys <- length(unique(datCredit_valid$PerfSpell_Key))
 vSpellKeys <- unique(datCredit_valid$PerfSpell_Key)
 
+
+
+# ------ Approach 1: Looped individual survfit()-calls by ID (multi-threaded) | Basic CPH-model
 
 # --- Iterate across spell keys and calculate survival-related quantities using survQuants()
 ptm <- proc.time() #IGNORE: for computation time calculation
@@ -117,7 +115,7 @@ datSurv_PWPST_basic <- foreach(j=1:numSpellKeys, .combine='rbind', .verbose=F, .
                           timeVar="TimeInPerfSpell", startVar="Start")
   } # ----------------- End of Inner Loop -----------------
 stopCluster(cl.port); 
-proc.time() - ptm; # 54h
+proc.time() - ptm; # 
 
 # - Save snapshots to disk (zip) for quick disk-based retrieval later
 pack.ffdf(paste0(genPath,"datSurv_PWPST_basic"), datSurv_PWPST_basic)
@@ -126,11 +124,6 @@ pack.ffdf(paste0(genPath,"datSurv_PWPST_basic"), datSurv_PWPST_basic)
 
 
 # ------ Approach 1: Looped individual survfit()-calls by ID (multi-threaded) | Advanced CPH-model
-
-# --- Preliminaries
-numSpellKeys <- length(unique(datCredit_valid$PerfSpell_Key))
-vSpellKeys <- unique(datCredit_valid$PerfSpell_Key)
-
 
 # --- Iterate across spell keys and calculate survival-related quantities using survQuants()
 ptm <- proc.time() #IGNORE: for computation time calculation
@@ -148,7 +141,7 @@ datSurv_PWPST <- foreach(j=1:numSpellKeys, .combine='rbind', .verbose=F, .inorde
                           timeVar="TimeInPerfSpell", startVar="Start")
   } # ----------------- End of Inner Loop -----------------
 stopCluster(cl.port); 
-proc.time() - ptm; # 54h
+proc.time() - ptm;
 
 # - Save snapshots to disk (zip) for quick disk-based retrieval later
 pack.ffdf(paste0(genPath,"datSurv_PWPST"), datSurv_PWPST)
@@ -179,70 +172,85 @@ datSurv_sub <- datSurv_sub %>% rename(Time=time, AtRisk_n=`n.risk`, Event_n=`n.e
   filter(Event_n > 0 | Censored_n >0) %>% as.data.table()
 setorder(datSurv_sub, Time)
 
-# - Confirm prepared datasets are loaded into memory
-if (!exists('datSurv_PWPST')) unpack.ffdf(paste0(genPath,"datSurv_PWPST"), tempPath);gc()
-setDT(datSurv_PWPST, key="End")
-#if (!exists('datSurv')) unpack.ffdf(paste0(genPath,"datSurv_KM_MultiSpell"), tempPath);gc()
 
-
-# - Determine population average survival and event rate across loans per time period
-datAggr <- datSurv_PWPST[, list(EventRate = mean(EventProb,na.rm=T), Freq=.N),by=list(End)]
-plot(datAggr[End <= sMaxSpellAge, End], datAggr[End <= sMaxSpellAge, EventRate], type="b")
-plot(datSurv_sub[Time <= 300, Time], datSurv_sub[Time <= 300, EventRate], type="b")
+# -- Aggregate data by Time in Performing Spell
 
 # - General parameters
 sMaxSpellAge <- 300 # max for [PerfSpell_Age], as determined in earlier analyses (script 4a(i))
 sMaxSpellAge_graph <- 300 # max for [PerfSpell_Age] for graphing purposes
 
+# - Confirm prepared datasets are loaded into memory
+if (!exists('datSurv_PWPST')) unpack.ffdf(paste0(genPath,"datSurv_PWPST"), tempPath);gc()
+if (!exists('datSurv_PWPST_basic')) unpack.ffdf(paste0(genPath,"datSurv_PWPST_basic"), tempPath);gc()
+setDT(datSurv_PWPST, key="End"); setDT(datSurv_PWPST_basic, key="End")
+#if (!exists('datSurv')) unpack.ffdf(paste0(genPath,"datSurv_KM_MultiSpell"), tempPath);gc()
+
+# - Determine population average survival and event rate across loans per time period
+datAggr <- datSurv_PWPST[, list(EventRate = mean(EventProb,na.rm=T), Freq=.N),by=list(End)]
+datAggr_basic <- datSurv_PWPST_basic[, list(EventRate = mean(EventProb,na.rm=T), Freq=.N),by=list(End)]
+plot(datSurv_sub[Time <= 300, Time], datSurv_sub[Time <= 300, EventRate], type="b") # actual
+plot(datAggr_basic[End <= sMaxSpellAge, End], datAggr_basic[End <= sMaxSpellAge, EventRate], type="b") # expected
+plot(datAggr[End <= sMaxSpellAge, End], datAggr[End <= sMaxSpellAge, EventRate], type="b") # expected
+
 # - Fitting natural cubic regression splines
 sDf_Act <- 12; sDf_Exp <- 12
 smthEventRate_Act <- lm(EventRate ~ ns(Time, df=sDf_Act), data=datSurv_sub[Time <= sMaxSpellAge,])
-smthEventRate_Exp <- lm(EventRate ~ ns(End, df=sDf_Exp), data=datAggr[End <= sMaxSpellAge])
-summary(smthEventRate_Act); summary(smthEventRate_Exp)
+smthEventRate_Exp_bas <- lm(EventRate ~ ns(End, df=sDf_Exp), data=datAggr_basic[End <= sMaxSpellAge])
+smthEventRate_Exp_adv <- lm(EventRate ~ ns(End, df=sDf_Exp), data=datAggr[End <= sMaxSpellAge])
+summary(smthEventRate_Act); summary(smthEventRate_Exp_bas); summary(smthEventRate_Exp_adv)
 
 # - Render predictions based on fitted smoother, with standard errors for confidence intervals
 vPredSmth_Act <- predict(smthEventRate_Act, newdata=datSurv_sub, se=T)
-vPredSmth_Exp <- predict(smthEventRate_Exp, newdata=datAggr, se=T)
+vPredSmth_Exp_bas <- predict(smthEventRate_Exp_bas, newdata=datAggr_basic, se=T)
+vPredSmth_Exp_adv <- predict(smthEventRate_Exp_adv, newdata=datAggr, se=T)
 
 # - Add smoothed estimate to graphing object
 datSurv_sub[, EventRate_spline := vPredSmth_Act$fit]
-datAggr[, EventRate_spline := vPredSmth_Exp$fit]
+datAggr_basic[, EventRate_spline := vPredSmth_Exp_bas$fit]
+datAggr[, EventRate_spline := vPredSmth_Exp_adv$fit]
 
 # - Create graphing data object
 datGraph <- rbind(datSurv_sub[,list(Time, EventRate, Type="a_Actual")],
                   datSurv_sub[,list(Time, EventRate=EventRate_spline, Type="b_Actual_spline")],
-                  datAggr[, list(Time=End, EventRate, Type="c_Expected")],
-                  datAggr[, list(Time=End, EventRate=EventRate_spline, Type="d_Expected_spline")]
+                  datAggr_basic[, list(Time=End, EventRate, Type="c_Expected_bas")],
+                  datAggr_basic[, list(Time=End, EventRate=EventRate_spline, Type="d_Expected_spline_bas")],
+                  datAggr[, list(Time=End, EventRate, Type="e_Expected_adv")],
+                  datAggr[, list(Time=End, EventRate=EventRate_spline, Type="f_Expected_spline_adv")]
 )
 
 # - Create different groupings for graphing purposes
-datGraph[Type %in% c("a_Actual","c_Expected"), EventRatePoint := EventRate ]
-datGraph[Type %in% c("b_Actual_spline","d_Expected_spline"), EventRateLine := EventRate ]
+datGraph[Type %in% c("a_Actual","c_Expected_bas", "e_Expected_adv"), EventRatePoint := EventRate ]
+datGraph[Type %in% c("b_Actual_spline","d_Expected_spline_bas", "f_Expected_spline_adv"), EventRateLine := EventRate ]
 datGraph[, FacetLabel := "Prentice-Williams-Peterson (PWP) spell-time"]
 
 # - Aesthetic engineering
 chosenFont <- "Cambria"
-vCol_Point <- brewer.pal(8, "Pastel1")[c(1,2)]
-vCol_Line <- brewer.pal(8, "Set1")[c(1,2)]
+vCol_Point <- brewer.pal(8, "Pastel1")[c(3,1,2)]
+vCol_Line <- brewer.pal(8, "Set1")[c(3,1,2)]
 mainEventName <- "Default"
 
 # - Calculate MAE between event rates
-datFusion <- merge(datSurv_sub[Time <= sMaxSpellAge], 
-                   datAggr[End <= sMaxSpellAge,list(Time=End, EventRate_Exp=EventRate)], by="Time")
-MAE_eventProb <- mean(abs(datFusion$EventRate - datFusion$EventRate_Exp), na.rm=T)
+datFusion_bas <- merge(datSurv_sub[Time <= sMaxSpellAge], 
+                   datAggr_basic[End <= sMaxSpellAge,list(Time=End, EventRate_Exp=EventRate)], by="Time")
+datFusion_adv <- merge(datSurv_sub[Time <= sMaxSpellAge], 
+                       datAggr[End <= sMaxSpellAge,list(Time=End, EventRate_Exp=EventRate)], by="Time")
+MAE_eventProb_bas <- mean(abs(datFusion_bas$EventRate - datFusion_bas$EventRate_Exp), na.rm=T)
+MAE_eventProb_adv <- mean(abs(datFusion_adv$EventRate - datFusion_adv$EventRate_Exp), na.rm=T)
 
 # - Graphing parameters
-vCol <- brewer.pal(10, "Paired")[c(3,4,1,2)]
+vCol <- brewer.pal(10, "Paired")[c(3,4,5,6, 1,2)]
 vLabel2 <- c("b_Actual_spline"=paste0("Actual spline (df=",sDf_Act,")"), 
-             "d_Expected_spline"=paste0("Expected spline (df=", sDf_Exp,")"),
-             "a_Actual"="Actual", "c_Expected"="Expected")
-vSize <- c(0.5,0.6,0.5,0.6)
-vLineType <- c("dashed", "solid", "dashed", "solid")
+             "d_Expected_spline_bas"=paste0("Expected spline: Basic (df=", sDf_Exp,")"),
+             "f_Expected_spline_adv"=paste0("Expected spline: Advanced (df=", sDf_Exp,")"),
+             "a_Actual"="Actual", "c_Expected_bas"="Expected: Basic", "e_Expected_adv"="Expected: Advanced" )
+vSize <- c(0.5,0.6,0.5,0.6,0.5,0.6)
+vLineType <- c("dashed", "solid", "dashed", "solid", "dashed", "solid")
 
 # - Create main graph 
 (gsurv_ft <- ggplot(datGraph[Time <= sMaxSpellAge_graph,], aes(x=Time, y=EventRate, group=Type)) + theme_minimal() +
     labs(y=bquote(plain(Event~probability~~italic(f(t))*" ["*.(mainEventName)*"]"*"")), 
-         x=bquote(Discrete~time~italic(t)*" (months) in spell: Multi-spell")) + 
+         x=bquote(Discrete~time~italic(t)*" (months) in spell: Multi-spell"),
+         subtitle="Term-structures of default risk: Cox PH") + 
     theme(text=element_text(family=chosenFont),legend.position = "bottom",
           strip.background=element_rect(fill="snow2", colour="snow2"),
           strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) + 
@@ -250,7 +258,9 @@ vLineType <- c("dashed", "solid", "dashed", "solid")
     geom_point(aes(y=EventRatePoint, colour=Type, shape=Type), size=1.25) + 
     geom_line(aes(y=EventRate, colour=Type, linetype=Type, linewidth=Type)) + 
     # Annotations
-    annotate("text", y=0.0025,x=100, label=paste0("MAE: ", percent(MAE_eventProb, accuracy=0.0001)), family=chosenFont,
+    annotate("text", y=0.0035,x=100, label=paste0("MAE (Basic): ", percent(MAE_eventProb_bas, accuracy=0.0001)), family=chosenFont,
+             size = 3) + 
+    annotate("text", y=0.0025,x=100, label=paste0("MAE (Advanced): ", percent(MAE_eventProb_adv, accuracy=0.0001)), family=chosenFont,
              size = 3) + 
     # Scales and options
     facet_grid(FacetLabel ~ .) + 
@@ -267,3 +277,7 @@ vLineType <- c("dashed", "solid", "dashed", "solid")
 dpi <- 180 # reset
 ggsave(gsurv_ft, file=paste0(genFigPath, "EventProb_", mainEventName,"_ActVsExp_CoxPH.png"),
        width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
+
+
+# - Cleanup
+rm(datAggr, datAggr_basic, datFusion_adv, datFusion_bas, datGraph)

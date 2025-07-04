@@ -1,4 +1,4 @@
-# ================================= HAZARD RATE ANALYSIS =========================================
+# ============================== HAZARD & EVENT RATE ANALYSIS =========================================
 # Analysis performed on the hazard rate of different performance spells. The 
 # analysis aids in the decision making about a suitable cut-off point beyond 
 # which all performance spells are grouped together.
