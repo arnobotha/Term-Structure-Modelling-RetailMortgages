@@ -50,6 +50,10 @@ datCredit_valid[, Start := TimeInPerfSpell - 1]
 datCredit_train[, Weight := ifelse(DefaultStatus1==1,10,1)]
 datCredit_valid[, Weight := ifelse(DefaultStatus1==1,10,1)] # for merging purposes
 
+# - Assign sample labels
+datCredit_train[, Sample := "Training"]
+datCredit_valid[, Sample := "Validation"]
+
 
 
 
@@ -208,7 +212,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
     # Main graph
     geom_line(aes(colour=Type, linetype=Type), linewidth=0.5, show.legend = F) + 
     # Annotations
-    annotate(geom="text", x=60, y=0.01, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
+    annotate(geom="text", x=60, y=0.011, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
              family=chosenFont, size=3.5, colour=vCol[1]) + 
     annotate(geom="text", x=55, y=0.009, label=paste0("IBS (Advanced): ", round(ibs_adv,3)), 
              family=chosenFont, size=3.5, colour=vCol[2]) +   
@@ -220,7 +224,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
 )
 
 # - Combining the two above plots onto a single graph
-(plot.full <- gOuter + annotation_custom(grob = ggplotGrob(gInner), xmin=0, xmax=200, ymin=0.25, ymax=0.9))
+(plot.full <- gOuter + annotation_custom(grob = ggplotGrob(gInner), xmin=0, xmax=200, ymin=0.25, ymax=1.2))
 
 # - Save plot
 dpi <- 280
@@ -256,7 +260,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
   # Main graph
   geom_line(aes(colour=Type, linetype=Type), linewidth=0.5) + 
   # Annotations
-  annotate(geom="text", x=50, y=18, label=paste0("IBS (Basic): ", round(objCoxDisc_bas$IBS,3)), 
+  annotate(geom="text", x=50, y=20, label=paste0("IBS (Basic): ", round(objCoxDisc_bas$IBS,3)), 
            family=chosenFont, size=3.5, colour=vCol[1]) + 
   annotate(geom="text", x=43, y=13, label=paste0("IBS (Advanced): ", round(objCoxDisc_adv$IBS,3)), 
            family=chosenFont, size=3.5, colour=vCol[2]) +     
@@ -283,7 +287,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
   # Main graph
   geom_line(aes(colour=Type, linetype=Type), linewidth=0.5, show.legend = F) + 
   # Annotations
-  annotate(geom="text", x=50, y=0.8, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
+  annotate(geom="text", x=50, y=0.85, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
            family=chosenFont, size=3.5, colour=vCol[1]) + 
   annotate(geom="text", x=45, y=0.7, label=paste0("IBS (Advanced): ", round(ibs_adv,3)), 
            family=chosenFont, size=3.5, colour=vCol[2]) +   
@@ -315,7 +319,10 @@ library(riskRegression)
 y <- Score(list("Cox.bas"=cox_PWPST_basic),
         formula=as.formula(paste0("Hist(TimeInPerfSpell,DefaultStatus1) ~ 1")),
         data=datCredit_train, conf.int=FALSE, summary=c("risks","IPA","ibs"),
-        times=1:300,ncpus=4, parallel="multicore") 
+        times=1:120,ncpus=4, parallel="multicore") 
+
+plot(y$Brier$score$Brier)
+
 
 
 library(pec)
@@ -324,7 +331,7 @@ test <- pec(
   object = list("Cox.bas" = cox_PWPST_basic),
   formula = Surv(TimeInPerfSpell, PerfSpell_Event) ~ 1,
   data = datCredit_train,
-  times = 1:300,
+  times = 1:120,
   exact = T,
   cens.model = "marginal"
 )

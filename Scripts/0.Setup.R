@@ -21,7 +21,6 @@
 require(haven) # for SAS imports
 require(ETLUtils)
 require(ffbase)
-require(ff)
 tempPath <- "C:/TempData"; options("fftempdir"=tempPath)
 
 # for data wrangling
@@ -140,11 +139,13 @@ source(paste0(path_cust,"TruEnd.R"))
 source(paste0(path_cust,'DelinqM.R'))
 
 # - Survival functions
-source(paste0(path_cust,'0b(i).FunkySurv.R'))
+source(paste0(path_cust,'0b.FunkySurv.R'))
 
 # - Custom survival-related functions - Residuals (Cox-Snell, Schoenfeld)
-source(paste0(path_cust,'0b(ii).FunkySurv_Residuals.R'))
+source(paste0(path_cust,'0c.FunkySurv_Residuals.R'))
 
 # - Custom survival-related functions - time-dependent ROC-analyses and unit tests
-source(paste0(path_cust,'0b(iii).FunkySurv_tROCkit.R'))
+source(paste0(path_cust,'0d.FunkySurv_tROCk.R'))
 
+# - Custom survival-related functions - time-dependent Brier Score
+source(paste0(path_cust,'0e.FunkySurv_tBrierScore.R'))
