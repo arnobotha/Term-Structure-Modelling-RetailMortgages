@@ -148,9 +148,9 @@ datAggr[, FacetLabel := "Discrete-time hazard models"]
 # - Graphing parameters
 chosenFont <- "Cambria"
 vCol <- brewer.pal(9, "Set1")[c(3,1,2)]
-vLabel <- c("a_Act" = "Actual/Empirical rate", 
-            "b_ExpBasic" = "Expected rate: Basic model",
-            "c_ExpAdvanced" = "Expected rate: Advanced model")
+vLabel <- c("a_Act" = "Actual rate", 
+            "b_ExpBasic" = "Expected rate: Basic",
+            "c_ExpAdvanced" = "Expected rate: Advanced")
 
 (gPlot <- ggplot(datAggr, aes(x=Date, y=EventRate, group=Type)) + theme_minimal() + 
     labs(x="Reporting time (ccyymm)", y="12-month default rate (%)") +
@@ -175,7 +175,7 @@ vLabel <- c("a_Act" = "Actual/Empirical rate",
     scale_x_date(date_breaks=paste0(6, " month"), date_labels = "%b %Y"))
 
 # Save graph
-dpi <- 200
+dpi <- 240
 ggsave(gPlot, file=paste0(genFigPath, "DefaultRate_ActVsExp_CoxDisc.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
 
 
@@ -230,9 +230,9 @@ datAggr[, FacetLabel := "Cox Proportional Hazard (CPH) models"]
 # - Graphing parameters
 chosenFont <- "Cambria"
 vCol <- brewer.pal(9, "Set1")[c(3,1,2)]
-vLabel <- c("a_Act" = "Actual/Empirical rate", 
-            "b_ExpBasic" = "Expected rate: Basic model",
-            "c_ExpAdvanced" = "Expected rate: Advanced model")
+vLabel <- c("a_Act" = "Actual rate", 
+            "b_ExpBasic" = "Expected rate: Basic",
+            "c_ExpAdvanced" = "Expected rate: Advanced")
 
 (gPlot <- ggplot(datAggr, aes(x=Date, y=EventRate, group=Type)) + theme_minimal() + 
     labs(x="Reporting time (ccyymm)", y="12-month default rate (%)") +
@@ -257,7 +257,7 @@ vLabel <- c("a_Act" = "Actual/Empirical rate",
     scale_x_date(date_breaks=paste0(6, " month"), date_labels = "%b %Y"))
 
 # Save graph
-dpi <- 200
+dpi <- 240
 ggsave(gPlot, file=paste0(genFigPath, "DefaultRate_ActVsExp_CoxPH.png"), width=1200/dpi, height=1000/dpi, dpi=dpi, bg="white")
 
 

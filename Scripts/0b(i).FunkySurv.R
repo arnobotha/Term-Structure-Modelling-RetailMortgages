@@ -461,15 +461,17 @@ survQuants <- function(datGiven, coxGiven, it=1, numKeys, genPath="", timeVar="E
 # Input:    [datGiven]: given loan history; [modGiven]: fitted cox PH or discrete-time hazard model;
 #           [predType]: option to pass to predict(); [spellPeriodMax]: maximum period to impose upon spell ages
 #           <fldNames>: Various field names for quantities of interest
+#           [modBase]: Baseline model from which to calculate a pseudo R^2-measure using IBS
 # Output:   Vector of tBS-values; Integrated Brier Score (IBS)
 tBrierScore <- function(datGiven, modGiven, predType="response", spellPeriodMax=300,
                         fldKey="PerfSpell_Key", fldStart = "Start", fldStop="TimeInPerfSpell",
-                        fldCensored="PerfSpell_Censored", fldSpellAge="PerfSpell_Age",
+                        fldEvent="PerfSpell_Event", fldCensored="PerfSpell_Censored", fldSpellAge="PerfSpell_Age",
                         fldSpellOutcome="PerfSpellResol_Type_Hist") {
   # Testing conditions
-  # datGiven <- datCredit; modGiven <- modLR; predType <- "response"; spellPeriodMax <- 300
+  # datGiven <- datCredit; modGiven <- cox_PWPST_basic ; predType <- "exp"; spellPeriodMax <- 300
   # fldKey <- "PerfSpell_Key"; fldStart <- "Start"; fldStop<-"TimeInPerfSpell";
   # fldCensored<-"PerfSpell_Censored"; fldSpellAge<-"PerfSpell_Age"; fldSpellOutcome<-"PerfSpellResol_Type_Hist"
+  # fldEvent="PerfSpell_Event"
   
   
   # --- Estimate survival rate of the censoring event G(t) = P(C >= t) for time-to-censoring variable C
@@ -487,6 +489,19 @@ tBrierScore <- function(datGiven, modGiven, predType="response", spellPeriodMax=
   datG_ti <- data.table(EventTime = summary(km_Censoring)$time, G_Ti = summary(km_Censoring)$surv)
   
   
+  # --- Estimate survival rate of the main event S(t) = P(T >= t) for time-to-event variable T
+  # This serves as a baseline model towards calculating the pseudo R^2-measure
+  
+  # - Compute Kaplan-Meier survival estimates (product-limit) for censoring-event | Spell-level with right-censoring & left-truncation
+  km_main <- survfit(
+    as.formula(paste0("Surv(time=",fldStart,", time2=", fldStop, ", event=", fldEvent, "==1, type='counting') ~ 1")), 
+    id=get(fldKey), data=datGiven)
+  # summary(km_main)$table # overall summary statistics
+  # plot(km_main, conf.int = T) # survival curve
+  datT <- data.table(summary(km_main)$time, summary(km_main)$surv)
+  setnames(datT, c(fldStop, "Survival_0"))
+  
+  
   # --- Calculate survival quantities of interest
   # Predict hazard h(t) = P(T=t | T>= t) in discrete-time
   datGiven[, Hazard := predict(modGiven, newdata=datGiven, type = predType)]
@@ -501,6 +516,9 @@ tBrierScore <- function(datGiven, modGiven, predType="response", spellPeriodMax=
   # - Merge censoring survival probability unto main set
   datGiven <- merge(datGiven, datG, by=fldStop, all.x=T)
   datGiven[is.na(G_t), G_t := 1] # Fill any missing G_t with 1 (no censoring information)
+  # - Merge event survival probability unto main set
+  datGiven <- merge(datGiven, datT, by=fldStop, all.x=T)
+  datGiven[is.na(Survival_0), Survival_0 := 1] # Fill any missing G_t with 1 (no censoring information)
   
   
   # --- Compute Censoring survival probability at age T_i for each subject (i,j), i..e, G_hat(T_i)
@@ -518,14 +536,21 @@ tBrierScore <- function(datGiven, modGiven, predType="response", spellPeriodMax=
                                          0)), by=list(get(fldKey))]
   # -- Compute squared error loss per row ---
   datGiven[, SquaredError := (y_t - Survival)^2]
+  datGiven[, SquaredError_0 := (y_t - Survival_0)^2]
   
   
   # --- Aggregate and compute weighted Brier score per time point
   datTBS <- datGiven[Weight_w > 0 & get(fldStop)<=spellPeriodMax, .(
-    mean(Weight_w * SquaredError, na.rm = TRUE)
+    mean(Weight_w * SquaredError, na.rm = TRUE),
+    mean(Weight_w * SquaredError_0, na.rm = TRUE)
   ), by=list(get(fldStop))]
-  setnames(datTBS, c(fldStop, "Brier"))
-  # Subset only to specified max
+  setnames(datTBS, c(fldStop, "Brier", "Brier_0"))
+  
+  # --- Calculate pseudo R^2
+  datTBS[, RSquared := 1 - Brier/Brier_0]
+  plot(datTBS$RSquared)
+  
+  # --- Calculate Integrated Brier Score assuming uniform weights
   IBS <- mean(datTBS$Brier, na.rm=T)
   
   return(list(tBS=datTBS, IBS=IBS))

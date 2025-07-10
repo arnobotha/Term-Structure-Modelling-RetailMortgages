@@ -55,7 +55,6 @@ datCredit_valid[, Weight := ifelse(DefaultStatus1==1,10,1)] # for merging purpos
 
 # ----------------- 2a. Fit a Cox regression model on the resampled prepared data
 
-
 # ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Basic Cox-regression model
 # - Initialize variables
 vecVars_PWPST_bas <- c("Arrears", "InterestRate_Nom")
@@ -65,7 +64,7 @@ vecVars_PWPST_bas <- c("Arrears", "InterestRate_Nom")
 cox_PWPST_basic <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ ", 
                                            paste(vecVars_PWPST_bas,collapse=" + "), 
                                            " + strata(PerfSpell_Num_binned)")),
-                         id=PerfSpell_Key, data=datCredit_train, ties="efron", model=T)
+                         id=PerfSpell_Key, data=datCredit_train, ties="efron", model=T, x=T)
 
 
 
@@ -85,7 +84,7 @@ vecVars_PWPST_adv <- c( # Delinquency-themed
 cox_PWPST_adv <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell,DefaultStatus1) ~ ", 
                                          paste(vecVars_PWPST_adv,collapse=" + "), 
                                          " + strata(PerfSpell_Num_binned)")),
-                       id=PerfSpell_Key, datCredit_train, ties="efron", model=T)
+                       id=PerfSpell_Key, datCredit_train, ties="efron", model=T, x=T)
 
 
 
@@ -175,7 +174,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
 
 # - Main graph of tBS
 (gOuter <- ggplot(datGraph, aes(x=TimeInPerfSpell, y=Brier, group=Type)) + theme_minimal() + 
-    labs(y=bquote("Time-dependent Brier Score "*italic(B)[s](italic(t))), x=bquote("Performing spell age (months)"*~italic(t))) + 
+    labs(y=bquote("Time-dependent Brier Score "*italic(B)[s](italic(t))), x=bquote("Performing spell age (months) "*~italic(t))) + 
     theme(text=element_text(family=chosenFont),legend.position="bottom", 
           strip.background=element_rect(fill="snow2", colour="snow2"),
           strip.text = element_text(size=8, colour="gray50"), strip.text.y.right = element_text(angle=90)) + 
@@ -209,9 +208,9 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
     # Main graph
     geom_line(aes(colour=Type, linetype=Type), linewidth=0.5, show.legend = F) + 
     # Annotations
-    annotate(geom="text", x=50, y=0.01, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
+    annotate(geom="text", x=60, y=0.01, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
              family=chosenFont, size=3.5, colour=vCol[1]) + 
-    annotate(geom="text", x=45, y=0.009, label=paste0("IBS (Advanced): ", round(ibs_adv,3)), 
+    annotate(geom="text", x=55, y=0.009, label=paste0("IBS (Advanced): ", round(ibs_adv,3)), 
              family=chosenFont, size=3.5, colour=vCol[2]) +   
     # Facets & scales
     scale_colour_manual(name="", values=vCol, labels=vLabel) + 
@@ -224,7 +223,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
 (plot.full <- gOuter + annotation_custom(grob = ggplotGrob(gInner), xmin=0, xmax=200, ymin=0.25, ymax=0.9))
 
 # - Save plot
-dpi <- 200
+dpi <- 280
 ggsave(plot.full, file=paste0(genFigPath,"tBrierScores_CoxPH.png"),width=1350/dpi, height=1000/dpi,dpi=dpi, bg="white")
 
 
@@ -284,9 +283,9 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
   # Main graph
   geom_line(aes(colour=Type, linetype=Type), linewidth=0.5, show.legend = F) + 
   # Annotations
-  annotate(geom="text", x=50, y=0.7, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
+  annotate(geom="text", x=50, y=0.8, label=paste0("IBS (Basic): ", round(ibs_bas,3)), 
            family=chosenFont, size=3.5, colour=vCol[1]) + 
-  annotate(geom="text", x=45, y=0.6, label=paste0("IBS (Advanced): ", round(ibs_adv,3)), 
+  annotate(geom="text", x=45, y=0.7, label=paste0("IBS (Advanced): ", round(ibs_adv,3)), 
            family=chosenFont, size=3.5, colour=vCol[2]) +   
   # Facets & scales
   scale_colour_manual(name="", values=vCol, labels=vLabel) + 
@@ -299,7 +298,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
 (plot.full <- gOuter + annotation_custom(grob = ggplotGrob(gInner), xmin=0, xmax=210, ymin=30, ymax=100))
 
 # - Save plot
-dpi <- 200
+dpi <- 280
 ggsave(plot.full, file=paste0(genFigPath,"tBrierScores_CoxDisc.png"),width=1350/dpi, height=1000/dpi,dpi=dpi, bg="white")
 
 
@@ -311,12 +310,20 @@ rm(gInner, datGraph, gOuter, objCoxDisc_adv, objCoxDisc_bas, objCoxPH_adv, objCo
 ##### TO-DO
 # - Compare tBS for Cox PH model with that obtained from pec(). And debug!
 
+library(riskRegression)
+
+y <- Score(list("Cox.bas"=cox_PWPST_basic),
+        formula=as.formula(paste0("Hist(TimeInPerfSpell,DefaultStatus1) ~ 1")),
+        data=datCredit_train, conf.int=FALSE, summary=c("risks","IPA","ibs"),
+        times=1:300,ncpus=4, parallel="multicore") 
+
+
 library(pec)
 
 test <- pec(
-  object = list("Cox.adv" = cox_PWPST_adv),
+  object = list("Cox.bas" = cox_PWPST_basic),
   formula = Surv(TimeInPerfSpell, PerfSpell_Event) ~ 1,
-  data = datCredit,
+  data = datCredit_train,
   times = 1:300,
   exact = T,
   cens.model = "marginal"

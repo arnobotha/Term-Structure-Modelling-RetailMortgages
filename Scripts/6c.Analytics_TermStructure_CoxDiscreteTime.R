@@ -218,28 +218,29 @@ MAE_eventProb_adv <- mean(abs(datFusion$EventRate - datFusion$EventRate_adv), na
 
 # - Graphing parameters
 vCol <- brewer.pal(10, "Paired")[c(3,4,5,6,1,2)]
-vLabel2 <- c("b_Actual_spline"=paste0("Actual spline (df=",sDf_Act,")"), 
-             "d_Expected_spline_bas"=paste0("Expected spline: Basic (df=", sDf_Exp,")"),
-             "f_Expected_spline_adv"=paste0("Expected spline: Advanced (df=", sDf_Exp,")"),
-             "a_Actual"="Actual", "c_Expected_bas"="Expected: Basic", "e_Expected_adv"="Expected: Advanced")
-vSize <- c(0.5,0.6,0.5,0.6,0.5,0.6)
+vLabel2 <- c("b_Actual_spline"=paste0("Actual spline"), 
+             "d_Expected_spline_bas"=paste0("Exp spline: Basic"),
+             "f_Expected_spline_adv"=paste0("Exp spline: Advanced"),
+             "a_Actual"="Actual", "c_Expected_bas"="Exp: Basic", "e_Expected_adv"="Exp: Advanced")
+vSize <- c(0.2,0.3,0.2,0.3,0.2,0.3)
 vLineType <- c("dashed", "solid", "dashed", "solid", "dashed", "solid")
 
 # - Create main graph 
 (gsurv_ft <- ggplot(datGraph[Time <= sMaxSpellAge_graph,], aes(x=Time, y=EventRate, group=Type)) + theme_minimal() +
     labs(y=bquote(plain(Event~probability~~italic(f(t))*" ["*.(mainEventName)*"]"*"")), 
-         x=bquote(Discrete~time~italic(t)*" (months) in spell: Multi-spell"),
-         subtitle="Term-structures of default risk: Discrete-time hazard models") + 
+         x=bquote("Performing spell age (months)"*~italic(t))
+         #subtitle="Term-structures of default risk: Discrete-time hazard models"
+         ) + 
     theme(text=element_text(family=chosenFont),legend.position = "bottom",
           strip.background=element_rect(fill="snow2", colour="snow2"),
           strip.text=element_text(size=8, colour="gray50"), strip.text.y.right=element_text(angle=90)) + 
     # Main graph
-    geom_point(aes(y=EventRatePoint, colour=Type, shape=Type), size=1.25) + 
+    geom_point(aes(y=EventRatePoint, colour=Type, shape=Type), size=0.6) + 
     geom_line(aes(y=EventRate, colour=Type, linetype=Type, linewidth=Type)) + 
     # Annotations
-    annotate("text", y=0.0025,x=100, label=paste0("MAE (basic): ", percent(MAE_eventProb_bas, accuracy=0.0001)), family=chosenFont,
+    annotate("text", y=0.015,x=100, label=paste0("MAE (basic): ", percent(MAE_eventProb_bas, accuracy=0.0001)), family=chosenFont,
              size = 3) + 
-    annotate("text", y=0.0035,x=100, label=paste0("MAE (advanced): ", percent(MAE_eventProb_adv, accuracy=0.0001)), family=chosenFont,
+    annotate("text", y=0.0125,x=100, label=paste0("MAE (advanced): ", percent(MAE_eventProb_adv, accuracy=0.0001)), family=chosenFont,
              size = 3) + 
     # Scales and options
     facet_grid(FacetLabel ~ .) + 
@@ -253,7 +254,7 @@ vLineType <- c("dashed", "solid", "dashed", "solid", "dashed", "solid")
 )
 
 # - Save plot
-dpi <- 180 # reset
+dpi <- 280 # reset
 ggsave(gsurv_ft, file=paste0(genFigPath, "EventProb_", mainEventName,"_ActVsExp_CoxDisc.png"),
        width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
 

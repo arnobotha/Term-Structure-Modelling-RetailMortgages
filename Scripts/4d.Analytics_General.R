@@ -98,8 +98,10 @@ vLabel <- c("a_AtRisk"=bquote("At-risk % of max("*italic(n)[t]*")"),
     scale_y_continuous(breaks=breaks_pretty(), label=percent) + 
     scale_x_continuous(breaks=breaks_pretty(n=8), label=comma))
 
-########################################################################################### AB: continue here
 # - Save plot
 dpi <- 180 # reset
 ggsave(gAtRisk, file=paste0(genFigPath, "Kaplan-Meier/AtRiskPop.png"),
        width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
+
+# - Cleanup
+rm(gAtRisk, datGraph, km_Default, datSurv_sub)
