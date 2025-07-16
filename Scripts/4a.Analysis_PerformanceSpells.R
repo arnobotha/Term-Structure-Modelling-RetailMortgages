@@ -255,43 +255,20 @@ datSpells[,Resol_Type_LR := case_when(PerfSpellResol_Type_Hist == "Defaulted" ~ 
 # - Aggregate to spell age level and count number of tied events
 datAggr <- datSpells[, list(Freq = .N), by=list(PerfSpell_Age, Resol_Type_LR)] %>% setkey(PerfSpell_Age, Resol_Type_LR)
 
-# - Convert to percentage of spells
-datAggr[, Freq_Sum := sum(Freq), by=list(Resol_Type_LR)]
-datAggr[, Freq_Perc := Freq/Freq_Sum, by=list(Resol_Type_LR)]
-# [SANITY CHECK] Sum to 1?
-sum(datAggr[Resol_Type_LR=="a_Default", Freq_Perc]) == 1
-### RESULTS: Yes
-
 # - Aesthetic engineering
 (Resol_Type_LR.props <- datSpells$Resol_Type_LR %>% table() %>% prop.table()) # get proportions of data
-# Given expected number of 1 per event time, calculate the related proportion
-sumTimeFreqs_a <- unique(datAggr[Resol_Type_LR=="a_Default", Freq_Sum])
-sumTimeFreqs_b <-unique(datAggr[Resol_Type_LR=="b_Right-censored", Freq_Sum])
-expTied_a <-  1/sumTimeFreqs_a
-expTied_b <- 1/sumTimeFreqs_b
-unTied_a <- unique(datAggr[Resol_Type_LR=="a_Default" & Freq == 0, .N])
-unTied_b <-unique(datAggr[Resol_Type_LR=="b_Right-censored" & Freq == 0, .N])
-# Add as separate records to graphing dataset
-datAggr <- rbind(datAggr,
-                 data.table(PerfSpell_Age = unique(datAggr$PerfSpell_Age),
-                            Resol_Type_LR = "c_Default-Exp", Freq = 1, 
-                            Freq_Sum = sumTimeFreqs_a, Freq_Perc = expTied_a),
-                 data.table(PerfSpell_Age = unique(datAggr$PerfSpell_Age),
-                            Resol_Type_LR = "d_Right-censored-Exp", Freq = 1, 
-                            Freq_Sum = sumTimeFreqs_b, Freq_Perc = expTied_b))
+(tiedSpells <- datAggr[Resol_Type_LR == "a_Default" & Freq > 1, .N] / datAggr[Resol_Type_LR == "a_Default", .N])
 
 # - Graphing Parameters
 chosenFont <- "Cambria"
 vCol <- brewer.pal(10, "Paired")[c(10,8, 9, 7)]
 vLabels <- c("a_Default"=paste0("Default (", round(Resol_Type_LR.props[1]*100, digits=1), "%)"), # Need to round to the first decimal place to ensure that the prior add up to one
-             "b_Right-censored"=paste0("Right-censored & competing risks (", round(Resol_Type_LR.props[2]*100, digits=1), "%)"),
-             "c_Default-Exp"= paste0("Default: # Expected ties (", percent(expTied_a, accuracy=0.0001) ,")"),
-             "d_Right-censored-Exp" = paste0("Right-censored: # Expected ties (", percent(expTied_b, accuracy=0.0001), ")"))
+             "b_Right-censored"=paste0("Right-censored & competing risks (", round(Resol_Type_LR.props[2]*100, digits=1), "%)"))
 
 # - Create graph
 (g1 <- ggplot(datAggr, aes(x=PerfSpell_Age, y=Freq, group=Resol_Type_LR)) + theme_minimal() +
-  labs(y="Total event time frequencies", 
-       x=bquote("Unique performing spell ages (months) / ordered event times "*~italic(t[ij]))) + 
+  labs(y="Tied spell age volumes", 
+       x=bquote("Performing spell ages (months)"*~italic(t))) + 
   theme(text=element_text(family=chosenFont),legend.position="inside", 
         legend.position.inside = c(0.65,0.6), 
         strip.background=element_rect(fill="snow2", colour="snow2"),
@@ -299,19 +276,17 @@ vLabels <- c("a_Default"=paste0("Default (", round(Resol_Type_LR.props[1]*100, d
   # Main graphs
   geom_line(aes(colour=Resol_Type_LR, linetype=Resol_Type_LR), linewidth=0.5) + 
   geom_point(aes(colour=Resol_Type_LR, shape=Resol_Type_LR), size=1) + 
-  #geom_hline(aes(yintercept=Exp_Freq_Perc, colour=Resol_Type_LR), linewidth=0.25) + 
-  annotate(geom="text", x=75, y=max(datAggr$Freq, na.rm=T)*0.02, 
-           label=paste("Maximum expected # of tied events: ", 1),
-           family=chosenFont, size=3.5) + 
+  annotate(geom="text", x=150, y=5000, label=paste0("% tied spell ages: ", percent(tiedSpells, accuracy=0.01)), 
+           family=chosenFont, size=3) + 
   # Facets and scales
-  scale_colour_manual(name=bquote("Resolution Type"*~italic(R[ij])), values=vCol, labels=vLabels) + 
-  scale_linetype_discrete(name=bquote("Resolution Type"*~italic(R[ij])), labels=vLabels) + 
-  scale_shape_discrete(name=bquote("Resolution Type"*~italic(R[ij])), labels=vLabels) + 
+  scale_colour_manual(name="Resolution Type", values=vCol, labels=vLabels) + 
+  scale_linetype_discrete(name="Resolution Type", labels=vLabels) + 
+  scale_shape_discrete(name="Resolution Type", labels=vLabels) + 
   scale_y_continuous(breaks=breaks_pretty(), label=comma) + 
   scale_x_continuous(breaks=breaks_pretty(), label=comma) )
 
 # - Save plot
-dpi <- 170
+dpi <- 200
 ggsave(g1, file=paste0(genFigPath,"TiedEvents_Extent.png"),width=1200/dpi, height=1000/dpi,dpi=dpi, bg="white")
 
 # - Cleanup

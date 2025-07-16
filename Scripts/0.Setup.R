@@ -145,7 +145,7 @@ source(paste0(path_cust,'0b.FunkySurv.R'))
 source(paste0(path_cust,'0c.FunkySurv_Residuals.R'))
 
 # - Custom survival-related functions - time-dependent ROC-analyses and unit tests
-source(paste0(path_cust,'0d.FunkySurv_tROCk.R'))
+source(paste0(path_cust,'0d.FunkySurv_tROC.R'))
 
 # - Custom survival-related functions - time-dependent Brier Score
 source(paste0(path_cust,'0e.FunkySurv_tBrierScore.R'))
