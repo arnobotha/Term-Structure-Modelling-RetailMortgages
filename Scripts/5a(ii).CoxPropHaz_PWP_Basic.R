@@ -82,7 +82,35 @@ GoF_CoxSnell_KS(cox_PWPST_basic, datCredit_train, GraphInd=TRUE, legPos=c(0.6,0.
                 fileName = paste0(genFigPath, "KS_Test_CoxSnellResiduals_Exp_PWPST_basic", ".png"), dpi=280) # 0.6167
 ### RESULTS: Goodness of fit for the model seems to be a bit low.
 
-# Save objects
+
+
+# - Manual test of Cox-Snell residuals
+# 1. Get baseline cumulative hazard
+datBaseHaz <- as.data.table(basehaz(cox_PWPST_basic, centered=F))
+# 2. Compute linear predictor
+datCredit_train[, LP := predict(cox_PWPST_basic, type="lp")]
+# 3a. Iterate per stratum
+for (i in 1:length(unique(datBaseHaz$strata))) {
+  # i <- 1
+  # 3b. Approximate H_0(T_i) for each subject using interpolation since "basehaz" returns discrete values
+  getH0 <- approxfun(datBaseHaz[strata==paste0("PerfSpell_Num_binned=",i), time], 
+                     datBaseHaz[strata==paste0("PerfSpell_Num_binned=",i), hazard],
+                     rule = 2)
+  datCredit_train[PerfSpell_Num_binned==i, H0 := getH0(TimeInPerfSpell)]
+}
+# 4. Compute Cox-Snell (CS) residuals as per definition H_0(t).exp(X^T \beta )
+datCredit_train[, CS_residual := H0 * exp(LP)]
+# 5. Treat CS-residuals as survival times towards computing cumulative hazard using Kaplan-Meier estimate of S(t)
+r_KM <- survfit(Surv(CS_residual, DefaultStatus1) ~ 1, data=datCredit_train)
+# 6. Plot diagnostic
+datPlot <- data.table(time=r_KM$time, surv=r_KM$surv); sLimit <- 1000
+plot(datPlot[1:sLimit,time], -log(datPlot[1:sLimit, surv]), type="s")
+abline(0,1, col="red", lty=2)
+### RESULTS: Deviates significantly from the red-line.
+
+
+
+# - Save objects
 pack.ffdf(paste0(genObjPath,"PWPST_Univariate_Models_basic"), Table_PWPST_basic)
 pack.ffdf(paste0(genPath,"PWPST_Cox_Model_basic"), cox_PWPST_basic)
 
