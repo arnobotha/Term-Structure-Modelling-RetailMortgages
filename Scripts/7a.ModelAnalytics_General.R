@@ -81,8 +81,8 @@ modLR <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars, collapse = " + "
 
 # --- Preliminaries
 # - Create pointer to the appropriate data object 
-#datCredit <- rbind(datCredit_train_PWPST, datCredit_valid_PWPST)
-datCredit <- datCredit_valid_PWPST
+#datCredit <- rbind(datCredit_train, datCredit_valid)
+datCredit <- datCredit_valid
 
 # --- Handle left-truncated spells by adding a starting record 
 # This is necessary for calculating certain survival quantities later
@@ -137,7 +137,7 @@ plot(datAggr[TimeInPerfSpell <= 300, EventRate], type="b")
 # - Plots: survival distributions
 plot(datAggr[TimeInPerfSpell <= 300, Survival], type="b")
 plot(datAggr[TimeInPerfSpell <= 300, CumulLifeDist], type="b")
-
+plot(datAggr[, CumulLifeDist], type="b")
 
 ### RESULTS: It seems there are fundamental differences in how one might derive the term-structure of default risk,
 # at least ito of its derivation from the cumulative default rate [DefRate_Marg], vs die survival-related [EventRate].
