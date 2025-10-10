@@ -409,7 +409,7 @@ vLabel <- c("a_Full"=expression(italic(A)[t]*": Full set "*italic(D)),
 
 # --- Create graph
 (g2 <- ggplot(datAggr_cohorts, aes(x=timeVar, y=Prop)) + theme_minimal() + 
-    labs(x=bquote("Performing spell cohorts (ccyymm): entry time "*italic(t[e])), y=bquote("Resolution rate (%) of type "*~italic(kappa))) +
+    labs(x=bquote("Performing spell cohorts: entry time "*italic(t[e])), y=bquote("Resolution rate (%) of type "*~italic(kappa))) +
     theme(text=element_text(family=chosenFont),legend.position = "bottom",
           axis.text.x=element_text(angle=90), legend.text=element_text(family=chosenFont), 
           strip.background=element_rect(fill="snow2", colour="snow2"),
@@ -534,7 +534,7 @@ vLabel <- c("a_Full"=expression(italic(A)[t]*": Full set "*italic(D)),
 
 # --- Create graph: Multi-facets
 (g4 <- ggplot(datAggr_cohorts, aes(x=timeVar, y=Prop)) + theme_minimal() + 
-    labs(x=bquote("Performing spell cohorts (ccyymm): stop time "*italic(t[e])), y=bquote("Resolution rate (%) of type "*~italic(kappa))) +
+    labs(x=bquote("Performing spell cohorts: stop time "*italic(t[e])), y=bquote("Resolution rate (%) of type "*~italic(kappa))) +
     theme(text=element_text(family=chosenFont),legend.position = "bottom",
           axis.text.x=element_text(angle=90), legend.text=element_text(family=chosenFont), 
           strip.background=element_rect(fill="snow2", colour="snow2"),
@@ -565,7 +565,7 @@ if (!is.na(resolType2_Val)){
   sDateMax <- max(datAggr_cohorts$timeVar) %m-% months(1)
 
   (g5 <- ggplot(datAggr_cohorts[Spell_Resol2==resolType2_Val & timeVar <= sDateMax,], aes(x=timeVar, y=Prop)) + theme_minimal() + 
-     labs(x=bquote("Performing spell cohorts (ccyymm): stop time "*italic(t[s])), y=bquote("Resolution rate (%) of type "*italic(kappa)==1)) +
+     labs(x=bquote("Performing spell cohorts: stop time"), y=bquote("Resolution rate (%) of type "*italic(kappa)==1)) +
      theme(text=element_text(family=chosenFont),legend.position = "bottom",
            axis.text.x=element_text(angle=90), #legend.text=element_text(family=chosenFont), 
            strip.background=element_rect(fill="snow2", colour="snow2"),
