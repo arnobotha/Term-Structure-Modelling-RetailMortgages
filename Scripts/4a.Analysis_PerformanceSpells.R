@@ -178,12 +178,12 @@ vLabels2 <- c(paste0("a_Settlement"="Settlement (", round(Resol_Type2.props[1]*1
 
 # - Densities of resolution types overlaid
 (g1_Densities_Resol_Type <- ggplot(datSurv[PerfSpell_Age<=500,], aes(x=PerfSpell_Age, group=Resol_Type)) + theme_minimal() + 
-    labs(y=bquote(plain('Empirical histogram & density ')~italic(f(t))), 
+    labs(y="Empirical histogram & density", 
          x=bquote("Performing spell age (months)"*~italic(t))) + 
     theme(text=element_text(family=chosenFont),legend.position.inside=c(0.785,0.2), 
           strip.background=element_rect(fill="snow2", colour="snow2"),
           strip.text = element_text(size=8, colour="gray50"), strip.text.y.right = element_text(angle=90),
-          legend.position=c(0.75,0.20)) + 
+          legend.position="inside") + 
     # Graphs
     geom_histogram(aes(y=after_stat(density), colour=Resol_Type, fill=Resol_Type), position="identity",
                    alpha=0.75, linewidth=0.2) + 
@@ -210,7 +210,7 @@ vLabels2 <- c(paste0("a_Settlement"="Settlement (", round(Resol_Type2.props[1]*1
           plot.title = element_text(hjust=0.55,vjust=-10,margin=margin(t=-12))) +
     # Graphs
     geom_histogram(aes(y=after_stat(density), colour=Resol_Type2, fill=Resol_Type2), position="identity",
-                   alpha=0.75, size=0.2) + 
+                   alpha=0.75, linewidth=0.2) + 
     geom_density(aes(colour=Resol_Type2, linetype=Resol_Type2), linewidth=0.6) + 
     # facets & scale options
     scale_colour_manual(name="", values=vCol[4:6], labels=vLabels2) + 
