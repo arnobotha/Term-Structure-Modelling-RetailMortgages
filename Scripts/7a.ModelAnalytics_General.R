@@ -145,7 +145,9 @@ datCredit[!is.na(PerfSpell_Num), EventRate_PD := shift(Survival_PD, type="lag", 
 # --- 1a. Aggregate to time in performing spell and calculate various survival quantities: TimeInPerfSpell
 datAggr <- datCredit[, list(Defaults = sum(DefaultStatus1), AtRisk = .N, Hazard = mean(DefaultStatus1),
                             EventRate_PD = mean(EventRate_PD, na.rm=T),
+                            EventRate_bas = mean(EventRate_bas, na.rm=T),
                             EventRate_adv = mean(EventRate_adv, na.rm=T),
+                            Hazard_bas = mean(Hazard_bas, na.rm=T), 
                             Hazard_adv = mean(Hazard_adv, na.rm=T)), 
                      by=list(TimeInPerfSpell)][order(TimeInPerfSpell),]
 # - Calculate more survival quantities
@@ -153,6 +155,7 @@ datAggr[, Survival := 1]
 datAggr[, Survival := cumprod(shift(Survival, type="lag",n=1,fill=1)*(1-Hazard))] # Kaplan-Meier
 datAggr[, CumulLifeDist := 1-Survival]
 datAggr[, CumulHazard := cumsum(Hazard)]
+datAggr[, CumulHazard_bas := cumsum(Hazard_bas)]
 datAggr[, CumulHazard_adv := cumsum(Hazard_adv)]
 datAggr[, EventRate := shift(Survival,type="lag", n=1,fill=1) - Survival]
 # - Cumulative default-related aggregates
@@ -172,14 +175,17 @@ plot(datAggr[, CumulLifeDist], type="b")
 # - Plots: survival-related
 plot(datAggr[TimeInPerfSpell <= 300, CumulHazard], type="b")
 lines(datAggr[TimeInPerfSpell <= 300, CumulHazard_adv], type="b", col="red")
+lines(datAggr[TimeInPerfSpell <= 300, CumulHazard_bas], type="b", col="blue")
 plot(datAggr[TimeInPerfSpell <= 300, Hazard], type="b")
 # Event rates
 plot(datAggr[TimeInPerfSpell <= 300, EventRate], type="b")
 lines(datAggr[TimeInPerfSpell <= 300, EventRate_adv], type="b", col="red")
+lines(datAggr[TimeInPerfSpell <= 300, EventRate_bas], type="b", col="blue")
 lines(datAggr[TimeInPerfSpell <= 300, EventRate_PD], type="b", col="cyan")
 # Cumulative lifetime distribution F(t)
 plot(datAggr[TimeInPerfSpell <= 300, 1- exp(-CumulHazard_adv)], type="b", col="red")
 lines(datAggr[TimeInPerfSpell <= 300, 1- exp(-CumulHazard)], type="b") 
+lines(datAggr[TimeInPerfSpell <= 300, 1- exp(-CumulHazard_bas)], type="b", col="blue")
 # - Plots: cumulative default rate
 plot(datAggr[TimeInPerfSpell <= 300, CumulDefRate], type="b")
 plot(datAggr[TimeInPerfSpell <= 300, DefRate_Marg], type="b")
