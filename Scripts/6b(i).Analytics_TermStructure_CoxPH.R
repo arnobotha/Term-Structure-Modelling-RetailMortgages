@@ -249,7 +249,7 @@ vLineType <- c("dashed", "solid", "dashed", "solid", "dashed", "solid")
 # - Create main graph 
 (gsurv_ft <- ggplot(datGraph[Time <= sMaxSpellAge_graph,], aes(x=Time, y=EventRate, group=Type)) + theme_minimal() +
     labs(y=bquote(plain(Event~probability~~italic(f(t))*" ["*.(mainEventName)*"]"*"")), 
-         x=bquote("Performing spell age (months)"*~italic(t)),
+         x=bquote("Spell time (months)"*~italic(t)),
          #subtitle="Term-structures of default risk: Cox PH"
          ) + 
     theme(text=element_text(family=chosenFont),legend.position = "bottom",

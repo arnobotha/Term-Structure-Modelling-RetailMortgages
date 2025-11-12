@@ -178,7 +178,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
 
 # - Main graph of tBS
 (gOuter <- ggplot(datGraph, aes(x=TimeInPerfSpell, y=Brier, group=Type)) + theme_minimal() + 
-    labs(y=bquote("Time-dependent Brier Score "*italic(B)[s](italic(t))), x=bquote("Performing spell age (months) "*~italic(t))) + 
+    labs(y=bquote("Time-dependent Brier Score "*italic(B)[s](italic(t))), x=bquote("Spell time (months) "*~italic(t))) + 
     theme(text=element_text(family=chosenFont),legend.position="bottom", 
           strip.background=element_rect(fill="snow2", colour="snow2"),
           strip.text = element_text(size=8, colour="gray50"), strip.text.y.right = element_text(angle=90)) + 
@@ -224,7 +224,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
 )
 
 # - Combining the two above plots onto a single graph
-(plot.full <- gOuter + annotation_custom(grob = ggplotGrob(gInner), xmin=0, xmax=200, ymin=0.25, ymax=1.2))
+(plot.full <- gOuter + annotation_custom(grob = ggplotGrob(gInner), xmin=0, xmax=200, ymin=0.25, ymax=0.9))
 
 # - Save plot
 dpi <- 280
@@ -253,7 +253,7 @@ vLabel <- c("a_Basic"="Basic", "b_Advanced"="Advanced")
 
 # - Main graph of tBS
 (gOuter <- ggplot(datGraph, aes(x=TimeInPerfSpell, y=Brier, group=Type)) + theme_minimal() + 
-  labs(y=bquote("Time-dependent Brier Score "*italic(B)[s](italic(t))), x=bquote("Performing spell age (months)"*~italic(t))) + 
+  labs(y=bquote("Time-dependent Brier Score "*italic(B)[s](italic(t))), x=bquote("Spell time (months)"*~italic(t))) + 
   theme(text=element_text(family=chosenFont),legend.position="bottom", 
         strip.background=element_rect(fill="snow2", colour="snow2"),
         strip.text = element_text(size=8, colour="gray50"), strip.text.y.right = element_text(angle=90)) + 
