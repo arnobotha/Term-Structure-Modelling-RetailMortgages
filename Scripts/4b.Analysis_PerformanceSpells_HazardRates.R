@@ -26,7 +26,7 @@
 #   - Event probabilities
 #   - Hazard rates
 #   - Kaplan-Meyer analysis by performance spells
-#   - datSurv objects | Respective to each setting, containiing survival, cumulative hezard, & event probabilities
+#   - datSurv objects | Respective to each setting, containing survival, cumulative hazard, & event probabilities
 # ------------------------------------------------------------------------------------------------------
 
 
