@@ -764,7 +764,7 @@ timeBinning <- function(x) {
 }
 datCredit_smp[, Time_Binned := timeBinning(TimeInPerfSpell)]
 table(datCredit_smp$Time_Binned) %>% prop.table()
-### RESULTS: Between 3% and 7% of observations in each bin; deemed appropriate, particulalarly in
+### RESULTS: Between 3% and 7% of observations in each bin; deemed appropriate, particularly in
 # capturing the earlier time periods (shorter interval bins).
 
 # Lag g0-delinq with appropriate period for discrete-time hazard model
