@@ -132,16 +132,16 @@ if (Username %in% c("Arno Botha", "arnos")) { # Dr Arno Botha | Kralkatorrik-mac
 # - Load all custom functions defined in a separate R-script
 source(paste0(path_cust,"0a.CustomFunctions.R"))
 
-# - True End procedure functions defined in a separate R-script
+# - Compile the TRuEnd-suite of evaluation (and auxilary) functions
 source(paste0(path_cust,"TruEnd.R"))
 
 # - Compile Delinquency Calculation Functions (CD, MD/DoD)
 source(paste0(path_cust,'DelinqM.R'))
 
-# - Survival functions
+# - Compile helper functions for evaluating discrete-time hazard survival models
 source(paste0(path_cust,'0b.FunkySurv.R'))
 
-# - Custom survival-related functions - Residuals (Cox-Snell, Schoenfeld)
+# - Custom survival-related functions - Residuals (Cox-Snell)
 source(paste0(path_cust,'0c.FunkySurv_Residuals.R'))
 
 # - Custom survival-related functions - time-dependent ROC-analyses and unit tests
