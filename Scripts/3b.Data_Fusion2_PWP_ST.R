@@ -305,6 +305,7 @@ hist(datCredit_smp$slc_acct_pre_lim_perc_imputed_med, breaks='FD')
 ### RESULTS: Imputation successful, with mean of 0.086 vs median of ,
 # bounded by [0, 0.74] for 5%-95% percentiles; no outliers, other than at 0 and 1
 
+
 # - Number of times an account was in arrears over last 24 months
 if (doDescribe) describe(datCredit_smp$slc_acct_roll_ever_24); hist(datCredit_smp$slc_acct_roll_ever_24, breaks='FD')
 datCredit_smp[is.na(slc_acct_roll_ever_24), .N] / datCredit_smp[,.N] * 100
@@ -322,8 +323,9 @@ hist(datCredit_smp$slc_acct_roll_ever_24_imputed_mean, breaks='FD')
 ### RESULTS: Imputation successful, categorical variable now has 6 distinct classes, with majority having 0-value, while
 # the imputed cases (value of 0.30) being the second most prevalent.
 
+
 # - Percentage-valued direction of prepaid/available funds - current compared to 12 months ago
-if (doDescribe) describe(datCredit_smp$slc_acct_prepaid_perc_dir_12); 
+if (doDescribe) describe2(datCredit_smp$slc_acct_prepaid_perc_dir_12); 
 hist(datCredit_smp[slc_acct_prepaid_perc_dir_12<=5, slc_acct_prepaid_perc_dir_12])
 datCredit_smp[is.na(slc_acct_prepaid_perc_dir_12), .N] / datCredit_smp[,.N] * 100
 ### RESULTS: Highly right-skewed distribution, with mean of ~13m vs median of 0, 
@@ -336,14 +338,14 @@ datCredit_smp[, slc_acct_prepaid_perc_dir_12_imputed_med :=
 cat( ( datCredit_smp[is.na(slc_acct_prepaid_perc_dir_12_imputed_med), .N] == 0) %?% 
        'SAFE: Treatment successful for [slc_acct_prepaid_perc_dir_12_imputed_med].\n' %:% 
        'ERROR: Treatment failed for [slc_acct_prepaid_perc_dir_12_imputed_med] \n' )
-if (doDescribe) describe(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_med); 
+if (doDescribe) describe2(datCredit_smp$slc_acct_prepaid_perc_dir_12_imputed_med); 
 hist(datCredit_smp[slc_acct_prepaid_perc_dir_12_imputed_med<=5, slc_acct_prepaid_perc_dir_12_imputed_med])
 ### RESULTS: Imputation successful, with mean of ~12m vs median of 0,
 # bounded by [0, 3.07] for 5%-95% percentiles; extreme outliers
 
 
 # - Amount by which the account is overdue at the associated reporting date
-if (doDescribe) describe(datCredit_smp$slc_past_due_amt); hist(datCredit_smp$slc_past_due_amt, breaks='FD')
+if (doDescribe) describe2(datCredit_smp$slc_past_due_amt); hist(datCredit_smp$slc_past_due_amt, breaks='FD')
 datCredit_smp[is.na(slc_past_due_amt), .N] / datCredit_smp[,.N] * 100
 ### RESULTS: Highly right-skewed distribution, with mean of 329.4 vs median of 0, 
 # bounded by [0, 171.4] for 5%-95% percentiles; some very large outliers
@@ -356,13 +358,14 @@ datCredit_smp[, slc_past_due_amt_imputed_med :=
 cat( ( datCredit_smp[is.na(slc_past_due_amt_imputed_med), .N] == 0) %?% 
        'SAFE: Treatment successful for [slc_past_due_amt_imputed_med].\n' %:% 
        'ERROR: Treatment failed for [slc_past_due_amt_imputed_med] \n' )
-if (doDescribe) describe(datCredit_smp$slc_past_due_amt_imputed_med); 
+if (doDescribe) describe2(datCredit_smp$slc_past_due_amt_imputed_med); 
 hist(datCredit_smp$slc_past_due_amt_imputed_med[datCredit_smp$slc_past_due_amt_imputed_med>0], breaks='FD')
 ### RESULTS: Imputation successful, with mean of 290.6 vs median of 0,
 # bounded by [0, 0] for 5%-95% percentiles; extreme outliers
 
+
 # - InterestRate_Margin (incorporating risk-based pricing info)
-if (doDescribe) describe(datCredit_smp$InterestRate_Margin); hist(datCredit_smp$InterestRate_Margin, breaks="FD")
+if (doDescribe) describe2(datCredit_smp$InterestRate_Margin); hist(datCredit_smp$InterestRate_Margin, breaks="FD")
 datCredit_smp[is.na(InterestRate_Margin), .N] / datCredit_smp[,.N] * 100
 ### RESULTS: Highly right-skewed distribution (as expected), with mean of -0.007 vs median of -0.008, 
 # bounded by [-0.02, 0.01] for 5%-95% percentiles; some negative outliers distort shape of distribution
@@ -374,7 +377,7 @@ datCredit_smp[, InterestRate_Margin_imputed_mean :=
 cat( ( datCredit_smp[is.na(InterestRate_Margin_imputed_mean), .N] == 0) %?% 
        'SAFE: Treatment successful for [InterestRate_Margin_imputed_mean].\n' %:% 
        'ERROR: Treatment failed for [InterestRate_Margin_imputed_mean] \n' )
-if (doDescribe) describe(datCredit_smp$InterestRate_Margin_imputed_mean);
+if (doDescribe) describe2(datCredit_smp$InterestRate_Margin_imputed_mean);
 hist(datCredit_smp$InterestRate_Margin_imputed_mean, breaks="FD")
 ### RESULTS: Imputation successful, with mean of -0.007 vs median of -0.008,
 # bounded by [-0.02, 0.01] for 5%-95% percentiles; some negative outliers distort shape of distribution
@@ -399,6 +402,7 @@ if (doDescribe) describe(datCredit_smp$AgteToTerm); hist(datCredit_smp[AgeToTerm
 ### RESULTS: Highly right-skewed distribution as expected, with mean of 0.37 vs median of 0.29,
 # bounded by [0.03, 0.9] for 5%-95% percentiles; some large outliers (max: 224)
 
+
 # - Balance to loan term | how much is still outstanding compared to Principal/Limit
 datCredit_smp[, BalanceToPrincipal := Balance/Principal]
 # [SANITY CHECK] Check new feature for illogical values
@@ -406,7 +410,7 @@ cat( ( datCredit_smp[is.na(BalanceToPrincipal), .N] == 0) %?%
        'SAFE: New feature [BalanceToPrincipal] has logical values.\n' %:% 
        'WARNING: New feature [BalanceToPrincipal] has illogical values \n' )
 # distributional analysis
-if (doDescribe) describe(datCredit_smp$BalanceToPrincipal); hist(datCredit_smp$BalanceToPrincipal, breaks='FD')
+if (doDescribe) describe2(datCredit_smp$BalanceToPrincipal); hist(datCredit_smp$BalanceToPrincipal, breaks='FD')
 ### RESULTS: Highly left-skewed distribution, with mean of 0.7 vs median of 0.85,
 # bounded by [~0, 1] for 5%-95% percentiles; no outliers
 
@@ -427,6 +431,7 @@ if (doDescribe) describe(datCredit_smp$pmnt_method_grp)
 # Debit Order: 68%; MISSING_DATA: 13%; Salary/Suspense: 6%; Statement: 12%
 ### CONCLUSION: Given the greater utility of this newly-binned variable, rather use this variable than [scl_pmnt_method]
 
+
 # - Factorised [g0_Delinq] variable
 datCredit_smp[,g0_Delinq_fac := as.factor(g0_Delinq)]
 if (doDescribe) describe(datCredit_smp$g0_Delinq_fac)
@@ -437,6 +442,7 @@ cat((anyNA(datCredit_smp$g0_Delinq_fac)) %?% 'WARNING: New feature [g0_Delinq_fa
       'SAFE: New feature [g0_Delinq_fac] has no missing values. \n')
 ### RESULTS: [g0_Delinq_fac] created without any missingness
 
+
 # - Bin [InterestRate_Margin_imputed] | Binning the variable into three equally sized bins
 datCredit_smp[, InterestRate_Margin_imputed_bin := factor(ntile(InterestRate_Margin_imputed_mean, n=3))]
 if (doDescribe) describe(datCredit_smp$InterestRate_Margin_imputed_bin)
@@ -446,6 +452,7 @@ cat((anyNA(datCredit_smp$InterestRate_Margin_imputed_bin)) %?% 'WARNING: New fea
       'SAFE: New feature [InterestRate_Margin_imputed_bin] has no missing values. \n')
 ### RESULTS: [InterestRate_Margin_imputed_bin] created without any missingness
 
+
 # - Bin [PerfSpell_Num] based on previous analysis (script 4a(i)) towards grouping later spells together
 # [SANITY CHECK] Check new feature for illogical values
 datCredit_smp[,PerfSpell_Grp := fifelse(PerfSpell_Num <= 3, PerfSpell_Num, 4)]
@@ -454,6 +461,7 @@ cat( (all.equal(datCredit_smp[PerfSpell_Num < 4,PerfSpell_Num], datCredit_smp[Pe
        'SAFE: New feature [PerfSpell_Grp] has no missing values and is binned as intended. \n' %:%
        'WARNING: New feature [PerfSpell_Grp] either has missing valeus or its binning failed. \n ' )
 
+
 # - Create indicator variable for specific arrears direction
 datCredit_smp[, slc_acct_arr_dir_3_Change_Ind := ifelse(slc_acct_arr_dir_3 != "SAME", 1,0)]
 
@@ -461,9 +469,11 @@ datCredit_smp[, slc_acct_arr_dir_3_Change_Ind := ifelse(slc_acct_arr_dir_3 != "S
 datCredit_smp[, PerfSpell_Num_binned := ifelse(PerfSpell_Num <= 3, PerfSpell_Num, 4)]
 
 
+
 # --- 6. Feature Engineering: Inflating time-sensitive monetary variables to the latest date
 # - Confirm that required data objects are loaded into memory
 if (!exists('datMV')) unpack.ffdf(paste0(genPath,"datMV"), tempPath)
+
 
 # - Getting a range of inflation factors for each date in the sampling window
 date_range <- ceiling_date(unique(datCredit_smp$Date), unit="month")-days(1)
@@ -475,6 +485,7 @@ cat((anyNA(datCredit_smp$Inf_Factor)) %?% paste0('WARNING: Inflation factor(s) i
       'SAFE: Inflation factors created successfully. \n')
 ### RESULTS: [Inf_Factor] variables  missing for 2022-12-31.
 
+
 # - Deflate the relevant variables using the pre-calculated inflation factors
 datCredit_smp[, Principal_Real := Principal*Inf_Factor]
 datCredit_smp[, Balance_Real := Balance*Inf_Factor]
@@ -484,10 +495,9 @@ datCredit_smp[, Instalment_Real := Instalment*Inf_Factor]
 cat( (all(anyNA(datCredit_smp$Principal_Real), anyNA(datCredit_smp$Balance_Real), anyNA(datCredit_smp$Instalment_Real)))
      %?% paste0('WARNING: Some values of [Principal_Real], [Balance_Real], and/or [Instalment_Real] not created successfully. \n') %:%
        'SAFE: Variables inflated successfully. \n')
-if (doDescribe) describe(datCredit_smp$Principal_Real); hist(datCredit_smp$Principal_Real[datCredit_smp$Principal_Real<5000000], breaks="FD")
-if (doDescribe) describe(datCredit_smp$Balance_Real); hist(datCredit_smp$Balance_Real[datCredit_smp$Balance_Real< 5000000], breaks="FD")
-if (doDescribe) describe(datCredit_smp$Instalment_Real); hist(datCredit_smp$Instalment_Real[datCredit_smp$Instalment_Real<25000], breaks="FD")
-### RESULTS:  Some values of [Principal_Real], [Balance_Real], and/or [Instalment_Real] not created successfully, refer to line 464.
+if (doDescribe) describe2(datCredit_smp$Principal_Real); hist(datCredit_smp$Principal_Real[datCredit_smp$Principal_Real<5000000], breaks="FD")
+if (doDescribe) describe2(datCredit_smp$Balance_Real); hist(datCredit_smp$Balance_Real[datCredit_smp$Balance_Real< 5000000], breaks="FD")
+if (doDescribe) describe2(datCredit_smp$Instalment_Real); hist(datCredit_smp$Instalment_Real[datCredit_smp$Instalment_Real<25000], breaks="FD")
 # [Principal_Real]# Highly right-skewed distribution, with mean of 8.95m vs median of 7.9m
 #                 bounded by [127k, 2.25m] for 5%-95% percentiles; severe outliers to the right: 95.6m
 # [Balance_Real]: Highly right-skewed distribution, with mean of 6.89m vs median of 5.93m
@@ -507,6 +517,7 @@ rm(datMV, date_range, datInflation)
 
 # - Confirm that required data objects are loaded into memory
 if (!exists('datCredit_smp')) unpack.ffdf(paste0(genPath,"creditdata_final_PWPST_smp1d"), tempPath)
+
 
 # - Pre default delinquency rate
 #Note: Creating an aggregated dataset with which to fuse to the full dataset
@@ -532,7 +543,7 @@ cat( ( sum(datCredit_smp[DefaultStatus1==0, sum(g0_Delinq_Any_Aggr_Prop + sum(g0
          sum(datCredit_smp[DefaultStatus1==0,.N,by=Date][,2]) & (sum(is.na(datCredit_smp$g0_Delinq_Any_Aggr_Prop))==0)) %?% 
        'SAFE: New feature [g0_Delinq_Any_Aggr_Prop] has logical values.\n' %:% 
        'WARNING: New feature [g0_Delinq_Any_Aggr_Prop] has illogical values \n' )
-if (doDescribe) describe(datCredit_smp$g0_Delinq_Any_Aggr_Prop); plot(unique(datCredit_smp$g0_Delinq_Any_Aggr_Prop), type="b")
+if (doDescribe) describe2(datCredit_smp$g0_Delinq_Any_Aggr_Prop); plot(unique(datCredit_smp$g0_Delinq_Any_Aggr_Prop), type="b")
 ### RESULTS: Variable has a logical trend, with mean of 0.059 vs median of 0.049, 
 # bounded by [0.038, 0.12] for 5%-95% percentiles; no large outliers
 # [SANITY CHECK] Check new feature for missingness after fusion
@@ -547,7 +558,7 @@ datCredit_smp[,g0_Delinq_Ave:=mean(ifelse(DefaultStatus1==0,g0_Delinq,0), na.rm=
 cat( (sum(datCredit_smp[, sum(is.na(g0_Delinq_Ave)), by=Date][,2])==0) %?% 
        'SAFE: New feature [g0_Delinq_Ave] has logical values.\n' %:% 
        'WARNING: New feature [g0_Delinq_Ave] has illogical values \n' )
-if (doDescribe) describe(datCredit_smp$g0_Delinq_Ave); hist(datCredit_smp$g0_Delinq_Ave, breaks="FD")
+if (doDescribe) describe2(datCredit_smp$g0_Delinq_Ave); hist(datCredit_smp$g0_Delinq_Ave, breaks="FD")
 ### RESULTS: Follows a logical trend, with mean of 0.06397 vs median of 0.05269,
 # bounded by [0.04357, 0.12998] for 5%-95% percentiles; no outliers
 
@@ -571,7 +582,7 @@ datCredit_smp <- merge(datCredit_smp, dat_DefaultRate[,-"DefaultStatus1_Aggr_Pro
 # [Sanity Check] Check if merge was successful by checking for missingness in the 12-month lagged version of the default rate
 cat((anyNA(datCredit_smp$DefaultStatus1_Aggr_Prop_Lag_12)) %?% 'WARNING: Merge unsuccessful, NA values present. \n' %:%
       'SAFE: Merge successful, no NA values present. \n')
-if (doDescribe) describe(datCredit_smp$DefaultStatus1_Aggr_Prop_Lag_12); hist(datCredit_smp$DefaultStatus1_Aggr_Prop_Lag_12, breaks="FD")
+if (doDescribe) describe2(datCredit_smp$DefaultStatus1_Aggr_Prop_Lag_12); hist(datCredit_smp$DefaultStatus1_Aggr_Prop_Lag_12, breaks="FD")
 ### RESULTS: No missingness after merge, merge successful. Original DefaultRate_12 has mean of 0.05 and median of 0.049; 
 # bounded by [0.028, 0.084] for 5%-95% percentiles; no outliers
 
@@ -592,9 +603,9 @@ cat( (sum(datCredit_smp[, sum(is.na(ArrearsToBalance_Aggr_Prop)), by=Date][,2])=
 cat( (sum(datCredit_smp[, sum(is.na(InstalmentToBalance_Aggr_Prop)), by=Date][,2])==0) %?% 
        'SAFE: New feature [InstalmentToBalance_Aggr_Prop] has logical values.\n' %:% 
        'WARNING: New feature [InstalmentToBalance_Aggr_Prop] has illogical values \n' )
-if (doDescribe) describe(datCredit_smp$InstalmentToBalance_Aggr_Prop); 
+if (doDescribe) describe2(datCredit_smp$InstalmentToBalance_Aggr_Prop); 
 plot(unique(datCredit_smp$Date),unique(datCredit_smp$InstalmentToBalance_Aggr_Prop), type="b")
-if (doDescribe) describe(datCredit_smp$ArrearsToBalance_Aggr_Prop); 
+if (doDescribe) describe2(datCredit_smp$ArrearsToBalance_Aggr_Prop); 
 plot(unique(datCredit_smp$ArrearsToBalance_Aggr_Prop), type="b")
 ### RESULTS [InstalmentToBalance_Aggr_Prop]: Variable has high volatility around 2010 as seen through the graphical plot. Mean of 0.01228 vs median of 0.012,
 #            bounded by [0.01088, 0.01422] for 5%-95% percentiles; no outliers
@@ -607,7 +618,7 @@ datCredit_smp[, CuringEvents_Aggr_Prop := sum(PerfSpell_Counter==1 & PerfSpell_N
 cat( (sum(datCredit_smp[, sum(is.na(CuringEvents_Aggr_Prop)), by=Date][,2])==0) %?% 
        'SAFE: New feature [CuringEvents_Aggr_Prop] has logical values.\n' %:% 
        'WARNING: New feature [CuringEvents_Aggr_Prop] has illogical values \n' )
-if (doDescribe)describe(datCredit_smp$CuringEvents_Aggr_Prop); plot(unique(datCredit_smp$CuringEvents_Aggr_Prop), type="b")
+if (doDescribe) describe2(datCredit_smp$CuringEvents_Aggr_Prop); plot(unique(datCredit_smp$CuringEvents_Aggr_Prop), type="b")
 ### RESULTS: Variable has mean of 0.001373 vs median of 0.0012615,
 # bounded by [0.0006567, 0.0026194] for 5%-95% percentiles; no outliers
 
@@ -617,7 +628,7 @@ datCredit_smp[, AgeToTerm_Aggr_Mean := mean(Age_Adj/Term, na.rm=T), by=Date]
 cat( (sum(datCredit_smp[, sum(is.na(AgeToTerm_Aggr_Mean)), by=Date][,2])==0) %?% 
        'SAFE: New feature [AgeToTerm_Aggr_Mean] has logical values.\n' %:% 
        'WARNING: New feature [AgeToTerm_Aggr_Mean] has illogical values \n' )
-if (doDescribe) describe(datCredit_smp$AgeToTerm_Aggr_Mean); plot(unique(datCredit_smp$AgeToTerm_Aggr_Mean), type="b")
+if (doDescribe) describe2(datCredit_smp$AgeToTerm_Aggr_Mean); plot(unique(datCredit_smp$AgeToTerm_Aggr_Mean), type="b")
 ### RESULTS: Variable behaves as expected, i.e., increases as the loan portfolio matures. Has mean 0.3621 and median 0.3878
 # bounded by [0.2568, 0.4006] for 5%-95% percentiles; no outliers
 
@@ -627,7 +638,7 @@ datCredit_smp[, PerfSpell_Maturity_Aggr_Mean := mean(PerfSpell_Age, na.rm=T), by
 cat( (sum(datCredit_smp[, sum(is.na(PerfSpell_Maturity_Aggr_Mean)), by=Date][,2])==0) %?% 
        'SAFE: New feature [PerfSpell_Maturity_Aggr_Mean] has logical values.\n' %:% 
        'WARNING: New feature [Perf_SpellMaturity_Aggr_Mean] has illogical values \n' )
-if (doDescribe) describe(datCredit_smp$PerfSpell_Maturity_Aggr_Mean); plot(unique(datCredit_smp$PerfSpell_Maturity_Aggr_Mean), type="b")
+if (doDescribe) describe2(datCredit_smp$PerfSpell_Maturity_Aggr_Mean); plot(unique(datCredit_smp$PerfSpell_Maturity_Aggr_Mean), type="b")
 ### RESULTS: Mean performance spell age seem to decrease over time. Has mean 135.1 and median 140.68;
 # bounded by [93.54, 152.44] for 5%-95% percentiles; no outliers
 
@@ -664,7 +675,7 @@ for (i in 1:length(list_merge_variables)){
 }
 cat( (length(which(results_missingness > 0)) == 0) %?% "SAFE: No missingness, fusion with aggregated data is successful.\n" %:%
        "WARNING: Missingness in certain aggregated fields detected, fusion compromised.\n")
-if (doDescribe) describe(datCredit_smp$InterestRate_Margin_Aggr_Med); plot(datCredit_smp[!duplicated(Date),InterestRate_Margin_Aggr_Med], type="b") # Only saving the base variable's descriptive statistics
+if (doDescribe) describe2(datCredit_smp$InterestRate_Margin_Aggr_Med); plot(datCredit_smp[!duplicated(Date),InterestRate_Margin_Aggr_Med], type="b") # Only saving the base variable's descriptive statistics
 ### RESULTS: Variable follows a logical trend over time. Has mean -0.008077 and median -0.0085;
 # bounded by [-0.012, -0.0040] for 5%-95% percentiles; no outliers
 
