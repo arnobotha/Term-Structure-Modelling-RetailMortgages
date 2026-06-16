@@ -39,48 +39,14 @@
 if (!exists('datCredit_train_PWPST')) unpack.ffdf(paste0(genPath,"creditdata_train_PWPST"), tempPath);gc()
 if (!exists('datCredit_valid_PWPST')) unpack.ffdf(paste0(genPath,"creditdata_valid_PWPST"), tempPath);gc()
 
-# - Use only performance spells
-datCredit_train <- datCredit_train_PWPST[!is.na(PerfSpell_Num),]
-datCredit_valid <- datCredit_valid_PWPST[!is.na(PerfSpell_Num),]
 
-# - Weigh default cases heavier. as determined interactively based on calibration success (script 6e)
-datCredit_train[, Weight := ifelse(DefaultStatus1==1,10,1)]
-datCredit_valid[, Weight := ifelse(DefaultStatus1==1,10,1)] # for merging purposes
+# - Load models
+if (!exists('modLR_PD_DtH')) unpack.ffdf(paste0(genPath,"mod_PD_DtH_Advanced"), tempPath);gc()
+if (!exists('modLR_basic')) unpack.ffdf(paste0(genPath,"mod_PD_DtH_Basic"), tempPath);gc()
 
 
 
-
-
-# ----------------- 2. Fit a discrete-time hazard model on the resampled prepared data
-
-
-# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Basic discrete-time hazard model
-# - Initialize variables
-vars_basic <- c("-1", "Time_Binned", "log(TimeInPerfSpell):PerfSpell_Num_binned",
-                "Arrears", "InterestRate_Nom", "M_Inflation_Growth_6")
-
-# - Fit discrete-time hazard model with selected variables
-modLR_basic <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars_basic, collapse = " + "))),
-                    data=datCredit_train, family="binomial", weights = Weight)
-
-
-
-# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Advanced discrete-time hazard model
-# - Initialize variables
-vars <- c("-1", "Time_Binned*PerfSpell_Num_binned", #"log(TimeInPerfSpell):PerfSpell_Num_binned",
-          "g0_Delinq_SD_4", "g0_Delinq_Lag_1", "slc_acct_arr_dir_3", "slc_acct_roll_ever_24_imputed_mean",
-          "AgeToTerm_Aggr_Mean", "InstalmentToBalance_Aggr_Prop", "NewLoans_Aggr_Prop",
-          "pmnt_method_grp", "InterestRate_Nom",
-          "M_Inflation_Growth_6","M_DTI_Growth")
-
-# - Fit discrete-time hazard model with selected variables
-modLR <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars, collapse = " + "))),
-              data=datCredit_train, family="binomial", weights = Weight)
-
-
-
-
-# ----------------- 3. Actual vs expected 12-month default rates | Discrete-time hazard models
+# ----------------- 2. Actual vs expected 12-month default rates | Discrete-time hazard models
 
 # --- Preliminaries
 # - Create pointer to the appropriate data object 
@@ -92,14 +58,15 @@ datCredit <- datCredit_valid_PWPST
 # This is necessary for calculating certain survival quantities later
 datAdd <- subset(datCredit, Counter == 1 & TimeInPerfSpell > 1)
 datAdd[, TimeInPerfSpell := TimeInPerfSpell-1]
+datAdd[, Time_Binned := timeBinning(TimeInPerfSpell)]
 datAdd[, Counter := 0]
-datCredit <- rbind(datCredit, datAdd)
-setorder(datCredit, PerfSpell_Key, TimeInPerfSpell) # Preparing for survival model scoring
+datAdd[, Added := T]
+datCredit <- rbind(datCredit[, Added := F], datAdd); setorder(datCredit, PerfSpell_Key, TimeInPerfSpell)
 
 
 # --- Calculate survival quantities of interest
 # Predict hazard h(t) = P(T=t | T>= t) in discrete-time
-datCredit[!is.na(PerfSpell_Num), Hazard_adv := predict(modLR, newdata=.SD[], type = "response")]
+datCredit[!is.na(PerfSpell_Num), Hazard_adv := predict(modLR_PD_DtH, newdata=.SD[], type = "response")]
 datCredit[!is.na(PerfSpell_Num), Hazard_bas := predict(modLR_basic, newdata=.SD[], type = "response")]
 # Derive survival probability S(t) = \prod ( 1- hazard)
 datCredit[!is.na(PerfSpell_Num), Survival_adv := cumprod(1-Hazard_adv), by=list(PerfSpell_Key)]
@@ -109,7 +76,7 @@ datCredit[!is.na(PerfSpell_Num), EventRate_adv := shift(Survival_adv, type="lag"
 datCredit[!is.na(PerfSpell_Num), EventRate_bas := shift(Survival_bas, type="lag", n=1, fill=1) - Survival_bas, by=list(PerfSpell_Key)]
 
 # - Remove added rows
-datCredit <- subset(datCredit, Counter > 0) %>% setorder(LoanID, Date)
+datCredit <- subset(datCredit, Added == F) %>% setorder(LoanID, Date)
 
 
 # --- Create 12-month PD by summing event probabilities across a rolling window
@@ -182,7 +149,7 @@ ggsave(gPlot, file=paste0(genFigPath, "DefaultRate_ActVsExp_CoxDisc.png"), width
 
 
 
-# ----------------- 4. Actual vs expected 12-month default rates | Cox Proportional Hazards models
+# ----------------- 3. Actual vs expected 12-month default rates | Cox Proportional Hazards models
 
 # --- Preliminaries
 # - Confirm prepared datasets are loaded into memory

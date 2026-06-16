@@ -95,29 +95,10 @@ cox_PWPST_adv <- coxph(as.formula(paste0("Surv(TimeInPerfSpell-1,TimeInPerfSpell
 
 # ----------------- 2b. Fit a discrete-time hazard model on the resampled prepared data
 
+# - Load models
+if (!exists('modLR_PD_DtH')) unpack.ffdf(paste0(genPath,"mod_PD_DtH_Advanced"), tempPath);gc()
+if (!exists('modLR_basic')) unpack.ffdf(paste0(genPath,"mod_PD_DtH_Basic"), tempPath);gc()
 
-# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Basic discrete-time hazard model
-# - Initialize variables
-vars_basic <- c("-1", "Time_Binned", "log(TimeInPerfSpell):PerfSpell_Num_binned",
-                "Arrears", "InterestRate_Nom", "M_Inflation_Growth_6")
-
-# - Fit discrete-time hazard model with selected variables
-modLR_basic <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars_basic, collapse = " + "))),
-                    data=datCredit_train, family="binomial", weights = Weight)
-
-
-
-# ------ Prentice-Williams-Peterson (PWP) Spell-time definition | Advanced discrete-time hazard model
-# - Initialize variables
-vars <- c("-1", "Time_Binned*PerfSpell_Num_binned", #"log(TimeInPerfSpell):PerfSpell_Num_binned",
-          "g0_Delinq_SD_4", "g0_Delinq_Lag_1", "slc_acct_arr_dir_3", "slc_acct_roll_ever_24_imputed_mean",
-          "AgeToTerm_Aggr_Mean", "InstalmentToBalance_Aggr_Prop", "NewLoans_Aggr_Prop",
-          "pmnt_method_grp", "InterestRate_Nom",
-          "M_Inflation_Growth_6","M_DTI_Growth")
-
-# - Fit discrete-time hazard model with selected variables
-modLR <- glm( as.formula(paste("PerfSpell_Event ~", paste(vars, collapse = " + "))),
-              data=datCredit_train, family="binomial", weights = Weight)
 
 
 
@@ -148,7 +129,7 @@ objCoxDisc_bas <- tBrierScore(datCredit, modGiven=modLR_basic, predType="respons
 
 # --- Prentice-Williams-Peterson (PWP) Spell-time definition | Advanced discrete-time hazard model
 
-objCoxDisc_adv <- tBrierScore(datCredit, modGiven=modLR, predType="response", spellPeriodMax=300, fldKey="PerfSpell_Key", 
+objCoxDisc_adv <- tBrierScore(datCredit, modGiven=modLR_PD_DtH, predType="response", spellPeriodMax=300, fldKey="PerfSpell_Key", 
                               fldStart="Start", fldStop="TimeInPerfSpell",fldCensored="PerfSpell_Censored", 
                               fldSpellAge="PerfSpell_Age", fldSpellOutcome="PerfSpellResol_Type_Hist")
 

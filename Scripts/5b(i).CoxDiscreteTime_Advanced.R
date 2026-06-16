@@ -629,7 +629,7 @@ coeftest(modLR, vcov.=robust_se)
 
 # Other diagnostics
 evalLR(modLR, modLR_base, datCredit_train, targetFld="PerfSpell_Event", predClass=1)
-### RESULTS: AIC:  86,046;  McFadden R^2:  51.70%; AUC:  99.94%.
+### RESULTS: AIC:  86,046;  McFadden R^2:  92.73%; AUC:  99.94%.
 
 
 
@@ -651,7 +651,7 @@ rm(datCredit_train_PWPST, datCredit_valid_PWPST); gc()
 datCredit_train[, Weight := ifelse(DefaultStatus1==1,10,1)]
 
 # - Fit an "empty" model as a performance gain, used within some diagnostic functions
-modLR_base <- glm(PerfSpell_Event ~ 1, data=datCredit_train, family="binomial")
+modLR_base <- glm(PerfSpell_Event ~ 1, data=datCredit_train, family="binomial", weights = Weight)
 
 # - Final variables
 vars <- c("-1", "Time_Binned*PerfSpell_Num_binned", #"log(TimeInPerfSpell):PerfSpell_Num_binned",
@@ -669,19 +669,12 @@ coeftest(modLR, vcov.=robust_se)
 
 # - Other diagnostics
 evalLR(modLR, modLR_base, datCredit_train, targetFld="PerfSpell_Event", predClass=1)
-### RESULTS: AIC:  86,046;  McFadden R^2:  51.70%; AUC:  99.94%.
-
-# - Test goodness-of-fit using AIC-measure over single-factor models
-aicTable_CoxDisc <- aicTable(datCredit_train, vars, TimeDef=c("Cox_Discrete","PerfSpell_Event"), genPath=genObjPath, modelType="Cox_Discrete")
-# Top variables: g0_Delinq_SD_4, g0_Delinq_Lag_1, slc_acct_arr_dir_3, slc_acct_roll_ever_24_imputed_mean, pmnt_method_grp, Time_Binned*PerfSpell_Num_binned
+### RESULTS: AIC:  86,046;  McFadden R^2:  92.73%; AUC:  99.94%.
 
 # Test accuracy using c-statistic over single-factor models
 concTable_CoxDisc <- concTable(datCredit_train, datCredit_valid, vars, TimeDef=c("Cox_Discrete","PerfSpell_Event"), genPath=genObjPath, modelType="Cox_Discrete")
 # Top variables: g0_Delinq_SD_4, g0_Delinq_Lag_1, slc_acct_arr_dir_3, slc_acct_roll_ever_24_imputed_mean, pmnt_method_grp, Time_Binned*PerfSpell_Num_binned
 
-# - Combine results into a single object
-Table_CoxDisc <- concTable_CoxDisc[,1:2] %>% left_join(aicTable_CoxDisc, by ="Variable")
-
-# Save objects
-pack.ffdf(paste0(genObjPath,"CoxDisc_advanced_fits"), Table_CoxDisc)
-
+# - Save objects
+modLR_PD_DtH <- modLR
+pack.ffdf(paste0(genPath,"mod_PD_DtH_Advanced"), modLR_PD_DtH)

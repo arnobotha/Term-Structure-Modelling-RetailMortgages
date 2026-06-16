@@ -43,7 +43,7 @@ rm(datCredit_train_PWPST, datCredit_valid_PWPST); gc()
 datCredit_train[, Weight := ifelse(DefaultStatus1==1,10,1)]
 
 # - Fit an "empty" model as a performance gain, used within some diagnostic functions
-modLR_base <- glm(PerfSpell_Event ~ 1, data=datCredit_train, family="binomial")
+modLR_base <- glm(PerfSpell_Event ~ 1, data=datCredit_train, family="binomial", weights = Weight)
 
 # - Final variables
 # Selection based on expert judgement alone, where the initial list being based on thematic selection
@@ -59,19 +59,12 @@ coeftest(modLR_basic, vcov.=robust_se)
 
 # - Other diagnostics
 evalLR(modLR_basic, modLR_base, datCredit_train, targetFld="PerfSpell_Event", predClass=1)
-### RESULTS: AIC:  653,566;  McFadden R^2:  -267.27% (??); AUC:  94.62%.
-
-# - Test goodness-of-fit using AIC-measure over single-factor models
-aicTable_CoxDisc_basic <- aicTable(datCredit_train, vars_basic, TimeDef=c("Cox_Discrete","PerfSpell_Event"), genPath=genObjPath, modelType="Cox_Discrete")
-# Top variables: Arrears, Time_Binned, InterestRate_Nom, M_Inflation_Growth_6
+### RESULTS: AIC:  653,566;  McFadden R^2: 44.72; AUC:  94.62%.
 
 # Test accuracy using c-statistic over single-factor models
 concTable_CoxDisc_basic <- concTable(datCredit_train, datCredit_valid, vars_basic, TimeDef=c("Cox_Discrete","PerfSpell_Event"), genPath=genObjPath, modelType="Cox_Discrete")
 # Top variables: Arrears, Time_Binned, InterestRate_Nom, M_Inflation_Growth_6 
 
-# - Combine results into a single object
-Table_CoxDisc_basic <- concTable_CoxDisc_basic[,1:2] %>% left_join(aicTable_CoxDisc_basic, by ="Variable")
-
-# Save objects
-pack.ffdf(paste0(genObjPath,"CoxDisc_basic_fits"), Table_CoxDisc_basic)
+# - Save objects
+pack.ffdf(paste0(genPath,"mod_PD_DtH_Basic"), modLR_basic)
 
